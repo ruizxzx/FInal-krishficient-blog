@@ -1,29 +1,38 @@
-import React, { useState, useEffect } from 'react';
-import { Article, Category, SiteConfig, BentoLink } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Article, Category, SiteConfig, BentoLink, CarouselSlide } from '../types';
 import { 
   X, 
-  Database, 
   PlusCircle, 
   Check, 
-  Settings,
-  Trash2,
-  AlertCircle,
-  Smartphone,
-  Link as LinkIcon,
-  ArrowUp,
-  ArrowDown,
-  Edit2,
-  Shield,
-  Layout,
-  RefreshCw,
-  Star
+  Settings, 
+  Trash2, 
+  Smartphone, 
+  Link as LinkIcon, 
+  ArrowUp, 
+  ArrowDown, 
+  Edit2, 
+  Shield, 
+  Layout, 
+  RefreshCw, 
+  Upload, 
+  Database,
+  Lock,
+  ExternalLink
 } from 'lucide-react';
-import { SANITY_CONFIG, saveCustomLocalArticle } from '../lib/sanity';
-import { loginWithGoogle, auth, logout } from '../lib/firebase';
-import { getCarouselSlides, addCarouselSlide, updateCarouselSlide, deleteCarouselSlide } from '../lib/community';
-import { CarouselSlide } from '../types';
-
-const ALLOWED_ADMIN_EMAILS = ['ruizxzxz@gmail.com', 'krishsarkar456@gmail.com'];
+import { loginWithGoogle, auth, logout, checkIsAdmin, ADMIN_EMAILS } from '../lib/firebase';
+import { 
+  saveArticle, 
+  deleteArticle, 
+  saveSiteConfig, 
+  saveBentoLinks, 
+  uploadImageToStorage 
+} from '../lib/cms';
+import { 
+  getCarouselSlides, 
+  addCarouselSlide, 
+  updateCarouselSlide, 
+  deleteCarouselSlide 
+} from '../lib/community';
 
 interface AdminStudioModalProps {
   isOpen: boolean;
@@ -49,37 +58,50 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   onUpdateBentoLinks
 }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user && user.email && ALLOWED_ADMIN_EMAILS.includes(user.email)) {
+      if (user && checkIsAdmin(user.email)) {
         setIsAuthenticated(true);
+        setCurrentUserEmail(user.email || null);
       } else {
         setIsAuthenticated(false);
+        setCurrentUserEmail(user?.email || null);
       }
     });
     return () => unsubscribe();
   }, []);
 
   const handleLogin = async () => {
+    setLoginError(null);
     try {
       setIsLoggingIn(true);
       const user = await loginWithGoogle();
-      if (user && user.email && ALLOWED_ADMIN_EMAILS.includes(user.email)) {
+      if (user && checkIsAdmin(user.email)) {
         setIsAuthenticated(true);
+        setCurrentUserEmail(user.email || null);
       } else {
-        alert("Access Denied: You are not an authorized administrator.");
+        setLoginError(`Access Denied: ${user?.email || 'Your account'} is not an authorized administrator. Authorized accounts: ${ADMIN_EMAILS.join(', ')}`);
         await logout();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login failed", error);
+      setLoginError(error.message || "Google Sign-In failed.");
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'create' | 'manage' | 'settings' | 'links' | 'sanity' | 'carousel'>('settings');
+  const handleLogout = async () => {
+    await logout();
+    setIsAuthenticated(false);
+    setCurrentUserEmail(null);
+  };
+
+  const [activeTab, setActiveTab] = useState<'settings' | 'create' | 'manage' | 'links' | 'carousel'>('settings');
 
   // Carousel State
   const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
@@ -87,6 +109,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [newSlideTitle, setNewSlideTitle] = useState('');
   const [newSlideImageUrl, setNewSlideImageUrl] = useState('');
   const [newSlideLinkUrl, setNewSlideLinkUrl] = useState('');
+  const [isUploadingSlideImage, setIsUploadingSlideImage] = useState(false);
 
   useEffect(() => {
     if (isOpen && isAuthenticated) {
@@ -100,14 +123,17 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       const slides = await getCarouselSlides();
       setCarouselSlides(slides);
     } catch (e) {
-      console.error(e);
+      console.error("Error loading carousel slides:", e);
     } finally {
       setIsLoadingCarousel(false);
     }
   };
 
   const handleAddSlide = async () => {
-    if (!newSlideImageUrl.trim()) return;
+    if (!newSlideImageUrl.trim()) {
+      alert("Please provide an image URL or upload an image.");
+      return;
+    }
     try {
       const added = await addCarouselSlide({
         title: newSlideTitle.trim(),
@@ -119,20 +145,20 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       setNewSlideTitle('');
       setNewSlideImageUrl('');
       setNewSlideLinkUrl('');
-    } catch (e) {
-      console.error(e);
-      alert('Failed to add slide');
+    } catch (e: any) {
+      console.error("Error adding carousel slide:", e);
+      alert('Failed to add slide to Firestore: ' + (e.message || 'Permission denied'));
     }
   };
 
   const handleDeleteSlide = async (id: string) => {
-    if (!confirm('Delete this slide?')) return;
+    if (!confirm('Are you sure you want to delete this promotional slide?')) return;
     try {
       await deleteCarouselSlide(id);
       setCarouselSlides(carouselSlides.filter(s => s.id !== id));
-    } catch (e) {
-      console.error(e);
-      alert('Failed to delete slide');
+    } catch (e: any) {
+      console.error("Error deleting slide:", e);
+      alert('Failed to delete slide: ' + (e.message || 'Permission denied'));
     }
   };
 
@@ -144,31 +170,29 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     newSlides[index] = newSlides[index + direction];
     newSlides[index + direction] = temp;
     
-    // Update orders locally
     newSlides.forEach((s, i) => s.order = i);
     setCarouselSlides(newSlides);
     
-    // Update orders in DB
     try {
       await updateCarouselSlide(newSlides[index].id, { order: newSlides[index].order });
       await updateCarouselSlide(newSlides[index + direction].id, { order: newSlides[index + direction].order });
     } catch (e) {
-      console.error(e);
+      console.error("Error updating slide orders:", e);
     }
   };
 
   // Site Config Form state
   const [logoImageUrl, setLogoImageUrl] = useState(siteConfig.logoImageUrl || '');
-  const [logoPart1, setLogoPart1] = useState(siteConfig.logoPart1);
-  const [logoPart2, setLogoPart2] = useState(siteConfig.logoPart2);
-  const [tagline, setTagline] = useState(siteConfig.tagline);
-  const [heroHeadline, setHeroHeadline] = useState(siteConfig.heroHeadline);
-  const [heroSubheadline, setHeroSubheadline] = useState(siteConfig.heroSubheadline);
-  const [heroBgColor, setHeroBgColor] = useState(siteConfig.heroBgColor);
+  const [logoPart1, setLogoPart1] = useState(siteConfig.logoPart1 || 'KRISH');
+  const [logoPart2, setLogoPart2] = useState(siteConfig.logoPart2 || 'FICIENT');
+  const [tagline, setTagline] = useState(siteConfig.tagline || '');
+  const [heroHeadline, setHeroHeadline] = useState(siteConfig.heroHeadline || '');
+  const [heroSubheadline, setHeroSubheadline] = useState(siteConfig.heroSubheadline || '');
+  const [heroBgColor, setHeroBgColor] = useState(siteConfig.heroBgColor || '#FFFFFF');
   const [manifestoText, setManifestoText] = useState(siteConfig.manifestoText || '');
   const [manifestoAuthor, setManifestoAuthor] = useState(siteConfig.manifestoAuthor || '');
-  const [authorName, setAuthorName] = useState(siteConfig.authorName || '');
-  const [authorRole, setAuthorRole] = useState(siteConfig.authorRole || '');
+  const [authorName, setAuthorName] = useState(siteConfig.authorName || 'Krish');
+  const [authorRole, setAuthorRole] = useState(siteConfig.authorRole || 'Founder & Systems Architect');
   const [authorAvatarUrl, setAuthorAvatarUrl] = useState(siteConfig.authorAvatarUrl || '');
   const [aboutMeTitle, setAboutMeTitle] = useState(siteConfig.aboutMeTitle || '');
   const [aboutMeBio, setAboutMeBio] = useState(siteConfig.aboutMeBio || '');
@@ -188,52 +212,87 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [contactTwitter, setContactTwitter] = useState(siteConfig.contactTwitter || '');
   const [contactGithub, setContactGithub] = useState(siteConfig.contactGithub || '');
   const [contactTelegram, setContactTelegram] = useState(siteConfig.contactTelegram || '');
-  
-  const [backupJson, setBackupJson] = useState('');
-  const [showBackupUI, setShowBackupUI] = useState(false);
 
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [configSuccess, setConfigSuccess] = useState(false);
 
-  const handleSaveConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    onUpdateSiteConfig({
-      logoImageUrl,
-      logoPart1,
-      logoPart2,
-      tagline,
-      heroHeadline,
-      heroSubheadline,
-      heroBgColor,
-      manifestoText,
-      manifestoAuthor,
-      authorName,
-      authorRole,
-      authorAvatarUrl,
-      aboutMeTitle,
-      aboutMeBio,
-      themePrimaryColor,
-      themeSecondaryColor,
-      themeAccentColor,
-      themeSuccessColor,
-      footerNewsletterTitle,
-      footerNewsletterSubtitle,
-      footerBrandStatement,
-      contactTitle,
-      contactSubtitle,
-      contactEmail,
-      contactTwitter,
-      contactGithub,
-      contactTelegram
-    });
-    setConfigSuccess(true);
-    setTimeout(() => setConfigSuccess(false), 2000);
-  };
-  const [projectId, setProjectId] = useState(SANITY_CONFIG.projectId || '');
-  const [dataset, setDataset] = useState(SANITY_CONFIG.dataset || 'production');
-  const [connectionStatus, setConnectionStatus] = useState<'idle' | 'checking' | 'success' | 'error'>('idle');
-  const [statusMessage, setStatusMessage] = useState('');
+  // Sync siteConfig prop with local state when siteConfig updates externally
+  useEffect(() => {
+    setLogoImageUrl(siteConfig.logoImageUrl || '');
+    setLogoPart1(siteConfig.logoPart1 || 'KRISH');
+    setLogoPart2(siteConfig.logoPart2 || 'FICIENT');
+    setTagline(siteConfig.tagline || '');
+    setHeroHeadline(siteConfig.heroHeadline || '');
+    setHeroSubheadline(siteConfig.heroSubheadline || '');
+    setHeroBgColor(siteConfig.heroBgColor || '#FFFFFF');
+    setManifestoText(siteConfig.manifestoText || '');
+    setManifestoAuthor(siteConfig.manifestoAuthor || '');
+    setAuthorName(siteConfig.authorName || 'Krish');
+    setAuthorRole(siteConfig.authorRole || 'Founder & Systems Architect');
+    setAuthorAvatarUrl(siteConfig.authorAvatarUrl || '');
+    setAboutMeTitle(siteConfig.aboutMeTitle || '');
+    setAboutMeBio(siteConfig.aboutMeBio || '');
+    setThemePrimaryColor(siteConfig.themePrimaryColor || '#FFD600');
+    setThemeSecondaryColor(siteConfig.themeSecondaryColor || '#00E0FF');
+    setThemeAccentColor(siteConfig.themeAccentColor || '#FF60B5');
+    setThemeSuccessColor(siteConfig.themeSuccessColor || '#00FF41');
+    setFooterNewsletterTitle(siteConfig.footerNewsletterTitle || '');
+    setFooterNewsletterSubtitle(siteConfig.footerNewsletterSubtitle || '');
+    setFooterBrandStatement(siteConfig.footerBrandStatement || '');
+    setContactTitle(siteConfig.contactTitle || '');
+    setContactSubtitle(siteConfig.contactSubtitle || '');
+    setContactEmail(siteConfig.contactEmail || '');
+    setContactTwitter(siteConfig.contactTwitter || '');
+    setContactGithub(siteConfig.contactGithub || '');
+    setContactTelegram(siteConfig.contactTelegram || '');
+  }, [siteConfig]);
 
-  // New Article Form state
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingConfig(true);
+    try {
+      const updated: SiteConfig = {
+        logoImageUrl,
+        logoPart1,
+        logoPart2,
+        tagline,
+        heroHeadline,
+        heroSubheadline,
+        heroBgColor,
+        manifestoText,
+        manifestoAuthor,
+        authorName,
+        authorRole,
+        authorAvatarUrl,
+        aboutMeTitle,
+        aboutMeBio,
+        themePrimaryColor,
+        themeSecondaryColor,
+        themeAccentColor,
+        themeSuccessColor,
+        footerNewsletterTitle,
+        footerNewsletterSubtitle,
+        footerBrandStatement,
+        contactTitle,
+        contactSubtitle,
+        contactEmail,
+        contactTwitter,
+        contactGithub,
+        contactTelegram
+      };
+      await saveSiteConfig(updated);
+      onUpdateSiteConfig(updated);
+      setConfigSuccess(true);
+      setTimeout(() => setConfigSuccess(false), 2000);
+    } catch (err: any) {
+      console.error("Failed to save site config to Firestore:", err);
+      alert("Failed to save config: " + (err.message || 'Permission denied'));
+    } finally {
+      setIsSavingConfig(false);
+    }
+  };
+
+  // Article Form state
   const [editingArticleId, setEditingArticleId] = useState<string | null>(null);
   const [editingArticleSlug, setEditingArticleSlug] = useState<string | null>(null);
   const [editingPublishedAt, setEditingPublishedAt] = useState<string | null>(null);
@@ -250,7 +309,10 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [newCodeLanguage, setNewCodeLanguage] = useState('typescript');
   const [newCodeSnippet, setNewCodeSnippet] = useState('');
   const [newTakeaway, setNewTakeaway] = useState('');
+  const [isPublishing, setIsPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
 
   // Bento Links state
   const [bentoTitle, setBentoTitle] = useState('');
@@ -258,11 +320,13 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [bentoIcon, setBentoIcon] = useState('link');
   const [bentoColor, setBentoColor] = useState('#ffffff');
   const [bentoIsFeatured, setBentoIsFeatured] = useState(false);
-  
-  const handleAddBentoLink = (e: React.FormEvent) => {
+  const [isSavingBento, setIsSavingBento] = useState(false);
+
+  const handleAddBentoLink = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bentoTitle.trim() || !bentoUrl.trim()) return;
     
+    setIsSavingBento(true);
     const newLink: BentoLink = {
       id: `bento-${Date.now()}`,
       title: bentoTitle.trim(),
@@ -273,124 +337,132 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       order: bentoLinks.length > 0 ? Math.max(...bentoLinks.map(l => l.order)) + 1 : 1
     };
     
-    onUpdateBentoLinks([...bentoLinks, newLink]);
-    
-    // Reset form
-    setBentoTitle('');
-    setBentoUrl('');
-    setBentoIcon('link');
-    setBentoColor('#ffffff');
-    setBentoIsFeatured(false);
+    const updatedLinks = [...bentoLinks, newLink];
+    try {
+      await saveBentoLinks(updatedLinks);
+      onUpdateBentoLinks(updatedLinks);
+      setBentoTitle('');
+      setBentoUrl('');
+      setBentoIcon('link');
+      setBentoColor('#ffffff');
+      setBentoIsFeatured(false);
+    } catch (err: any) {
+      console.error("Failed to save bento link:", err);
+      alert("Failed to save link: " + (err.message || "Permission denied"));
+    } finally {
+      setIsSavingBento(false);
+    }
   };
   
-  const handleDeleteBentoLink = (id: string) => {
-    onUpdateBentoLinks(bentoLinks.filter(link => link.id !== id));
+  const handleDeleteBentoLink = async (id: string) => {
+    const updatedLinks = bentoLinks.filter(link => link.id !== id);
+    try {
+      await saveBentoLinks(updatedLinks);
+      onUpdateBentoLinks(updatedLinks);
+    } catch (err: any) {
+      console.error("Failed to delete bento link:", err);
+      alert("Failed to delete link: " + (err.message || "Permission denied"));
+    }
   };
   
-  const handleMoveBentoLink = (index: number, direction: 'up' | 'down') => {
+  const handleMoveBentoLink = async (index: number, direction: 'up' | 'down') => {
     if (direction === 'up' && index > 0) {
       const newLinks = [...bentoLinks];
       const temp = newLinks[index].order;
       newLinks[index].order = newLinks[index - 1].order;
       newLinks[index - 1].order = temp;
-      onUpdateBentoLinks(newLinks.sort((a, b) => a.order - b.order));
+      const sorted = newLinks.sort((a, b) => a.order - b.order);
+      try {
+        await saveBentoLinks(sorted);
+        onUpdateBentoLinks(sorted);
+      } catch (e) {
+        console.error("Failed to update bento link order:", e);
+      }
     } else if (direction === 'down' && index < bentoLinks.length - 1) {
       const newLinks = [...bentoLinks];
       const temp = newLinks[index].order;
       newLinks[index].order = newLinks[index + 1].order;
       newLinks[index + 1].order = temp;
-      onUpdateBentoLinks(newLinks.sort((a, b) => a.order - b.order));
-    }
-  };
-
-  if (!isOpen) return null;
-
-  const testConnection = async () => {
-    if (!projectId.trim()) {
-      setConnectionStatus('error');
-      setStatusMessage('Please enter a Sanity Project ID.');
-      return;
-    }
-
-    setConnectionStatus('checking');
-    setStatusMessage('Checking Sanity GROQ endpoint...');
-
-    try {
-      const url = `https://${projectId.trim()}.api.sanity.io/v2024-03-01/data/query/${dataset}?query=*[_type == "post"][0..2]`;
-      const res = await fetch(url);
-      if (res.ok) {
-        setConnectionStatus('success');
-        setStatusMessage('Successfully connected to Sanity API endpoint!');
-      } else {
-        setConnectionStatus('error');
-        setStatusMessage(`Sanity responded with HTTP ${res.status}: ${res.statusText}`);
+      const sorted = newLinks.sort((a, b) => a.order - b.order);
+      try {
+        await saveBentoLinks(sorted);
+        onUpdateBentoLinks(sorted);
+      } catch (e) {
+        console.error("Failed to update bento link order:", e);
       }
-    } catch (err: any) {
-      setConnectionStatus('error');
-      setStatusMessage(err?.message || 'Connection failed.');
     }
   };
 
-  const handlePublish = (e: React.FormEvent) => {
+  const handlePublish = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newExcerpt.trim()) return;
 
-    const slug = editingArticleSlug || newTitle
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
+    setIsPublishing(true);
+    setPublishError(null);
 
-    const tagsArray = newTags.split(',').map((t) => t.trim()).filter(Boolean);
+    try {
+      const slug = editingArticleSlug || newTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
 
-    const article: Article = {
-      id: editingArticleId || `custom-${Date.now()}`,
-      slug,
-      title: newTitle.trim(),
-      excerpt: newExcerpt.trim(),
-      category: newCategory,
-      tags: tagsArray.length ? tagsArray : ['Engineering'],
-      publishedAt: editingPublishedAt || new Date().toISOString().split('T')[0],
-      readingTimeMinutes: Number(newReadingTime) || 5,
-      coverImage: newCoverImage.trim() || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop',
-      coverImageAlt: newCoverAlt || newTitle,
-      coverImageCaption: newCoverCaption,
-      featured: false,
-      trending: true,
-      viewsCount: 1,
-      clapsCount: 0,
-      author: {
-        name: siteConfig.authorName || 'Krish',
-        role: siteConfig.authorRole || 'Founder & Software Architect',
-        avatar: siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-        bio: 'Writing about distributed systems, modern web runtimes, and engineering craft.'
-      },
-      content: [
-        {
-          type: 'paragraph',
-          content: newParagraph1 || newExcerpt
+      const tagsArray = newTags.split(',').map((t) => t.trim()).filter(Boolean);
+
+      const article: Article = {
+        id: editingArticleId || `article-${Date.now()}`,
+        slug,
+        title: newTitle.trim(),
+        excerpt: newExcerpt.trim(),
+        category: newCategory,
+        tags: tagsArray.length ? tagsArray : ['Engineering'],
+        publishedAt: editingPublishedAt || new Date().toISOString().split('T')[0],
+        readingTimeMinutes: Number(newReadingTime) || 5,
+        coverImage: newCoverImage.trim() || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop',
+        coverImageAlt: newCoverAlt || newTitle,
+        coverImageCaption: newCoverCaption,
+        featured: false,
+        trending: true,
+        viewsCount: 1,
+        clapsCount: 0,
+        author: {
+          name: siteConfig.authorName || 'Krish',
+          role: siteConfig.authorRole || 'Founder & Systems Architect',
+          avatar: siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
+          bio: siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.'
         },
-        ...(newCodeSnippet ? [{
-          type: 'code' as const,
-          codeBlock: {
-            language: newCodeLanguage,
-            filename: `solution.${newCodeLanguage === 'typescript' ? 'ts' : newCodeLanguage === 'python' ? 'py' : 'txt'}`,
-            code: newCodeSnippet
-          }
-        }] : []),
-        ...(newTakeaway ? [{
-          type: 'takeaways' as const,
-          items: [newTakeaway]
-        }] : [])
-      ]
-    };
+        content: [
+          {
+            type: 'paragraph',
+            content: newParagraph1 || newExcerpt
+          },
+          ...(newCodeSnippet ? [{
+            type: 'code' as const,
+            codeBlock: {
+              language: newCodeLanguage,
+              filename: `solution.${newCodeLanguage === 'typescript' ? 'ts' : newCodeLanguage === 'python' ? 'py' : 'txt'}`,
+              code: newCodeSnippet
+            }
+          }] : []),
+          ...(newTakeaway ? [{
+            type: 'takeaways' as const,
+            items: [newTakeaway]
+          }] : [])
+        ]
+      };
 
-    saveCustomLocalArticle(article);
-    onArticlePublished(article);
-    setPublishSuccess(true);
-    setTimeout(() => {
-      setPublishSuccess(false);
-      resetForm();
-    }, 2000);
+      await saveArticle(article);
+      onArticlePublished(article);
+      setPublishSuccess(true);
+      setTimeout(() => {
+        setPublishSuccess(false);
+        resetForm();
+      }, 1500);
+    } catch (err: any) {
+      console.error("Failed to save article to Firestore:", err);
+      setPublishError(err.message || "Failed to persist article to Firestore.");
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   const handleEditArticle = (article: Article) => {
@@ -407,7 +479,6 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setNewCoverCaption(article.coverImageCaption || '');
     setNewReadingTime(article.readingTimeMinutes);
     
-    // Parse content
     const p1 = article.content?.find(c => c.type === 'paragraph');
     const code = article.content?.find(c => c.type === 'code');
     const takeaways = article.content?.find(c => c.type === 'takeaways');
@@ -416,6 +487,17 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setNewCodeSnippet(code?.codeBlock?.code || '');
     setNewCodeLanguage(code?.codeBlock?.language || 'typescript');
     setNewTakeaway(takeaways?.items?.[0] || '');
+  };
+
+  const handleDeleteArticleClick = async (slug: string) => {
+    if (!confirm(`Are you sure you want to permanently delete the article "${slug}" from Firestore?`)) return;
+    try {
+      await deleteArticle(slug);
+      onDeleteArticle(slug);
+    } catch (err: any) {
+      console.error("Failed to delete article:", err);
+      alert("Failed to delete article from Firestore: " + (err.message || "Permission denied"));
+    }
   };
 
   const resetForm = () => {
@@ -430,7 +512,41 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setNewCodeSnippet('');
     setNewTakeaway('');
     setNewCoverImage('https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop');
+    setPublishError(null);
   };
+
+  // Image Upload Handlers
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingCover(true);
+    try {
+      const url = await uploadImageToStorage(file, 'covers');
+      setNewCoverImage(url);
+    } catch (err: any) {
+      console.error("Cover upload failed:", err);
+      alert("Failed to upload image to Firebase Storage: " + (err.message || "Error"));
+    } finally {
+      setIsUploadingCover(false);
+    }
+  };
+
+  const handleSlideUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingSlideImage(true);
+    try {
+      const url = await uploadImageToStorage(file, 'carousel');
+      setNewSlideImageUrl(url);
+    } catch (err: any) {
+      console.error("Slide upload failed:", err);
+      alert("Failed to upload slide image: " + (err.message || "Error"));
+    } finally {
+      setIsUploadingSlideImage(false);
+    }
+  };
+
+  if (!isOpen) return null;
 
   return (
     <div className="w-full bg-neutral-100 min-h-[calc(100vh-64px)] py-8 sm:py-12 px-4 sm:px-6 lg:px-8 flex justify-center items-start">
@@ -442,857 +558,796 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
             <Database className="w-6 h-6 text-black stroke-[2.5]" />
             <div>
               <h2 className="font-display font-black text-xl text-black uppercase tracking-tight">
-                KRISHFICIENT CMS STUDIO &amp; PUBLISHER
+                KRISHFICIENT CMS STUDIO
               </h2>
               <div className="font-mono text-[11px] text-black/90 font-bold">
-                SANITY CMS INTEGRATION &bull; MOBILE &amp; DESKTOP READY
+                PERSISTENT FIRESTORE CMS &bull; GLOBAL CLOUD SYNCHRONIZATION
               </div>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 bg-white border-2 border-black neo-shadow-sm hover:bg-black hover:text-white transition-colors active:translate-x-0.5 active:translate-y-0.5"
-            title="Close Admin Studio"
-          >
-            <X className="w-5 h-5 stroke-[2.5]" />
-          </button>
+          
+          <div className="flex items-center space-x-3">
+            {isAuthenticated && (
+              <button
+                onClick={handleLogout}
+                className="px-3 py-1 bg-white border-2 border-black font-mono text-xs font-bold uppercase hover:bg-neutral-100"
+              >
+                Sign Out ({currentUserEmail?.split('@')[0]})
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="w-10 h-10 bg-white border-2 border-black flex items-center justify-center hover:bg-black hover:text-white transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
+        {/* Auth Guard */}
         {!isAuthenticated ? (
-          <div className="p-16 flex flex-col items-center justify-center space-y-6 text-center bg-white min-h-[500px]">
-            <Shield className="w-16 h-16 text-[var(--color-primary)] stroke-[2]" />
-            <div>
-              <h3 className="font-display font-black text-2xl uppercase tracking-tight mb-2">Authentication Required</h3>
-              <p className="font-mono text-sm text-neutral-500">You must be an authorized administrator to access the CMS Engine.</p>
+          <div className="p-12 text-center flex flex-col items-center justify-center space-y-4 bg-white min-h-[400px]">
+            <div className="w-16 h-16 bg-[var(--color-primary)] neo-border-2 flex items-center justify-center neo-shadow-sm mb-2">
+              <Lock className="w-8 h-8 text-black stroke-[2.5]" />
             </div>
+            <h3 className="font-display font-black text-2xl uppercase text-black">
+              ADMINISTRATOR VERIFICATION REQUIRED
+            </h3>
+            <p className="font-sans text-sm text-neutral-600 max-w-md">
+              Sign in with an authorized administrator Google account to access the KRISHFICIENT Editorial Studio and persist global content.
+            </p>
+            
+            {loginError && (
+              <div className="p-3 bg-red-100 border-2 border-red-500 font-mono text-xs text-red-800 max-w-md">
+                {loginError}
+              </div>
+            )}
+
             <button
               onClick={handleLogin}
               disabled={isLoggingIn}
-              className="mt-4 px-8 py-4 bg-[var(--color-primary)] border-4 border-black font-display font-black text-sm uppercase neo-shadow-sm hover:bg-[var(--color-secondary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
+              className="mt-4 px-8 py-4 bg-[var(--color-primary)] border-4 border-black font-display font-black text-sm uppercase neo-shadow-sm hover:bg-[var(--color-secondary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50 flex items-center space-x-2"
             >
-              {isLoggingIn ? 'Authenticating...' : 'Sign In with Google'}
+              <Shield className="w-5 h-5" />
+              <span>{isLoggingIn ? 'AUTHENTICATING...' : 'SIGN IN WITH AUTHORIZED GOOGLE ACCOUNT'}</span>
             </button>
           </div>
         ) : (
           <div className="bg-white min-h-[600px] flex flex-col">
 
-        {/* Tab Selector */}
-        <div className="grid grid-cols-6 border-b-4 border-black font-display font-black text-[10px] sm:text-xs uppercase bg-white overflow-x-auto whitespace-nowrap">
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'settings' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span className="hidden sm:inline">SETTINGS</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('create')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'create' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
-            }`}
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span className="hidden sm:inline">CREATE</span>
-          </button>
+            {/* Tab Selector (5 Clean Modules) */}
+            <div className="grid grid-cols-5 border-b-4 border-black font-display font-black text-[10px] sm:text-xs uppercase bg-white overflow-x-auto whitespace-nowrap">
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+                  activeTab === 'settings' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
+                }`}
+              >
+                <Settings className="w-4 h-4" />
+                <span className="hidden sm:inline">SETTINGS</span>
+              </button>
+              
+              <button
+                onClick={() => setActiveTab('create')}
+                className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+                  activeTab === 'create' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
+                }`}
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span className="hidden sm:inline">{editingArticleSlug ? 'EDIT ARTICLE' : 'WRITE ARTICLE'}</span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('manage')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'manage' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
-            }`}
-          >
-            <Trash2 className="w-4 h-4" />
-            <span className="hidden sm:inline">MANAGE</span>
-          </button>
+              <button
+                onClick={() => setActiveTab('manage')}
+                className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+                  activeTab === 'manage' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
+                }`}
+              >
+                <Edit2 className="w-4 h-4" />
+                <span className="hidden sm:inline">MANAGE ({articles.length})</span>
+              </button>
 
-          <button
-            onClick={() => setActiveTab('links')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'links' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
-            }`}
-          >
-            <LinkIcon className="w-4 h-4" />
-            <span className="hidden sm:inline">LINKS</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('carousel')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'carousel' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
-            }`}
-          >
-            <Layout className="w-4 h-4" />
-            <span className="hidden sm:inline">CAROUSEL</span>
-          </button>
+              <button
+                onClick={() => setActiveTab('links')}
+                className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+                  activeTab === 'links' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
+                }`}
+              >
+                <LinkIcon className="w-4 h-4" />
+                <span className="hidden sm:inline">BENTO LINKS</span>
+              </button>
+              
+              <button
+                onClick={() => setActiveTab('carousel')}
+                className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+                  activeTab === 'carousel' ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-neutral-100'
+                }`}
+              >
+                <Layout className="w-4 h-4" />
+                <span className="hidden sm:inline">CAROUSEL</span>
+              </button>
+            </div>
 
-          <button
-            onClick={() => setActiveTab('sanity')}
-            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
-              activeTab === 'sanity' ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-neutral-100'
-            }`}
-          >
-            <Database className="w-4 h-4" />
-            <span className="hidden sm:inline">SANITY</span>
-          </button>
-        </div>
-
-        {/* Tab: Carousel Management */}
-        {activeTab === 'carousel' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-8 bg-neutral-50">
-            <div>
-              <h2 className="font-display font-black text-2xl uppercase tracking-tight mb-2">Featured Carousel Slides</h2>
-              <p className="font-sans text-sm text-neutral-600 mb-6">Manage the auto-sliding promotional banners shown on the home page.</p>
-
-              <div className="bg-white border-2 border-black p-4 shadow-[4px_4px_0_0_#000] mb-8">
-                <h3 className="font-mono text-sm font-bold uppercase mb-4">Add New Slide</h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Title</label>
-                    <input 
-                      type="text" 
-                      value={newSlideTitle}
-                      onChange={(e) => setNewSlideTitle(e.target.value)}
-                      placeholder="e.g. Subscribe to my new course!"
-                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                    />
+            {/* TAB: SETTINGS */}
+            {activeTab === 'settings' && (
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
+                <div className="bg-[var(--color-secondary)]/30 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
+                  <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
+                    <Settings className="w-4 h-4 text-black" />
+                    <span>GLOBAL CLOUD SITE CONFIGURATION</span>
                   </div>
-                  <div>
-                    <label className="font-mono text-xs font-bold uppercase block mb-1">Image URL (Thumbnail)</label>
-                    <input 
-                      type="url" 
-                      value={newSlideImageUrl}
-                      onChange={(e) => setNewSlideImageUrl(e.target.value)}
-                      placeholder="https://images.unsplash.com/..."
-                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                    />
+                  <p>All settings are persistently synced to Firestore and reflected immediately across devices.</p>
+                </div>
+
+                {configSuccess && (
+                  <div className="p-3 bg-[var(--color-success)] border-2 border-black font-mono text-xs font-bold flex items-center space-x-2 neo-shadow-sm">
+                    <Check className="w-4 h-4" />
+                    <span>Global settings saved to Firestore!</span>
                   </div>
-                  <div>
-                    <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
-                    <input 
-                      type="url" 
-                      value={newSlideLinkUrl}
-                      onChange={(e) => setNewSlideLinkUrl(e.target.value)}
-                      placeholder="https://example.com/promo"
-                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                    />
+                )}
+
+                <form onSubmit={handleSaveConfig} className="space-y-6">
+                  {/* BRANDING SECTION */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Branding</h4>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Logo Image URL (Optional)</label>
+                      <input 
+                        type="text" 
+                        value={logoImageUrl} 
+                        onChange={(e) => setLogoImageUrl(e.target.value)} 
+                        className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" 
+                        placeholder="https://..." 
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Logo Part 1</label>
+                        <input type="text" value={logoPart1} onChange={(e) => setLogoPart1(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Logo Part 2 (Accent)</label>
+                        <input type="text" value={logoPart2} onChange={(e) => setLogoPart2(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none text-[var(--color-accent)]" />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Tagline</label>
+                      <input type="text" value={tagline} onChange={(e) => setTagline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                    </div>
                   </div>
+
+                  {/* HERO SECTION */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Hero Section</h4>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Hero Headline</label>
+                      <textarea rows={2} value={heroHeadline} onChange={(e) => setHeroHeadline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-display font-bold text-lg focus:outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Hero Subheadline</label>
+                      <textarea rows={3} value={heroSubheadline} onChange={(e) => setHeroSubheadline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Hero Background Color</label>
+                      <div className="flex items-center space-x-2">
+                        <input type="color" value={heroBgColor} onChange={(e) => setHeroBgColor(e.target.value)} className="w-10 h-10 border-2 border-black p-0.5 cursor-pointer" />
+                        <input type="text" value={heroBgColor} onChange={(e) => setHeroBgColor(e.target.value)} className="flex-1 px-3 py-2 border-2 border-black font-mono focus:outline-none uppercase text-xs" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* TERMINAL MANIFESTO */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Terminal Manifesto</h4>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Manifesto Text</label>
+                      <textarea rows={3} value={manifestoText} onChange={(e) => setManifestoText(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-serif text-sm focus:outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Manifesto Author</label>
+                      <input type="text" value={manifestoAuthor} onChange={(e) => setManifestoAuthor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                    </div>
+                  </div>
+
+                  {/* AUTHOR / ABOUT */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Author &amp; About Profile</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Author Name</label>
+                        <input type="text" value={authorName} onChange={(e) => setAuthorName(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Author Role</label>
+                        <input type="text" value={authorRole} onChange={(e) => setAuthorRole(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Avatar Image URL</label>
+                      <input type="text" value={authorAvatarUrl} onChange={(e) => setAuthorAvatarUrl(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">About Section Title</label>
+                      <input type="text" value={aboutMeTitle} onChange={(e) => setAboutMeTitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">About Bio</label>
+                      <textarea rows={4} value={aboutMeBio} onChange={(e) => setAboutMeBio(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none" />
+                    </div>
+                  </div>
+
+                  {/* GLOBAL THEME ACCENT PALETTE */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Neo-Brutalist Theme Palette</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div>
+                        <label className="font-mono text-[10px] font-bold uppercase block mb-1">Primary Color</label>
+                        <div className="flex items-center space-x-1">
+                          <input type="color" value={themePrimaryColor} onChange={e => setThemePrimaryColor(e.target.value)} className="w-8 h-8 border border-black cursor-pointer" />
+                          <input type="text" value={themePrimaryColor} onChange={e => setThemePrimaryColor(e.target.value)} className="w-full px-2 py-1 border border-black font-mono text-xs uppercase" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] font-bold uppercase block mb-1">Secondary Color</label>
+                        <div className="flex items-center space-x-1">
+                          <input type="color" value={themeSecondaryColor} onChange={e => setThemeSecondaryColor(e.target.value)} className="w-8 h-8 border border-black cursor-pointer" />
+                          <input type="text" value={themeSecondaryColor} onChange={e => setThemeSecondaryColor(e.target.value)} className="w-full px-2 py-1 border border-black font-mono text-xs uppercase" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] font-bold uppercase block mb-1">Accent Pink</label>
+                        <div className="flex items-center space-x-1">
+                          <input type="color" value={themeAccentColor} onChange={e => setThemeAccentColor(e.target.value)} className="w-8 h-8 border border-black cursor-pointer" />
+                          <input type="text" value={themeAccentColor} onChange={e => setThemeAccentColor(e.target.value)} className="w-full px-2 py-1 border border-black font-mono text-xs uppercase" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="font-mono text-[10px] font-bold uppercase block mb-1">Success Green</label>
+                        <div className="flex items-center space-x-1">
+                          <input type="color" value={themeSuccessColor} onChange={e => setThemeSuccessColor(e.target.value)} className="w-8 h-8 border border-black cursor-pointer" />
+                          <input type="text" value={themeSuccessColor} onChange={e => setThemeSuccessColor(e.target.value)} className="w-full px-2 py-1 border border-black font-mono text-xs uppercase" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* CONTACT INFO */}
+                  <div className="space-y-4">
+                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Contact Channels</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Contact Email</label>
+                        <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Twitter / X Handle</label>
+                        <input type="text" value={contactTwitter} onChange={(e) => setContactTwitter(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">GitHub Profile</label>
+                        <input type="text" value={contactGithub} onChange={(e) => setContactGithub(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">Telegram Handle</label>
+                        <input type="text" value={contactTelegram} onChange={(e) => setContactTelegram(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+                      </div>
+                    </div>
+                  </div>
+
                   <button
-                    onClick={handleAddSlide}
-                    className="px-6 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+                    type="submit"
+                    disabled={isSavingConfig}
+                    className="w-full py-4 bg-[var(--color-primary)] text-black font-display font-black text-base uppercase neo-border neo-shadow-sm hover:bg-[var(--color-secondary)] active:translate-x-1 active:translate-y-1 transition-all disabled:opacity-50"
                   >
-                    Add Slide
+                    {isSavingConfig ? 'SAVING TO FIRESTORE...' : 'SAVE ALL SETTINGS GLOBALLY'}
+                  </button>
+                </form>
+              </div>
+            )}
+
+            {/* TAB: CREATE / EDIT ARTICLE */}
+            {activeTab === 'create' && (
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
+                <div className="bg-[var(--color-primary)]/30 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
+                  <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
+                    <Smartphone className="w-4 h-4 text-black" />
+                    <span>{editingArticleSlug ? `EDITING: ${editingArticleSlug}` : 'NEW ARTICLE PUBLISHER'}</span>
+                  </div>
+                  <p>
+                    Published articles are immediately stored in the Firestore database and will appear dynamically on the live site across devices.
+                  </p>
+                </div>
+
+                {publishSuccess ? (
+                  <div className="py-12 text-center bg-white neo-border p-8 space-y-3">
+                    <div className="w-12 h-12 bg-[var(--color-success)] neo-border-2 flex items-center justify-center mx-auto neo-shadow-sm">
+                      <Check className="w-6 h-6 text-black stroke-[3]" />
+                    </div>
+                    <h3 className="font-display font-black text-2xl uppercase text-black">ARTICLE PERSISTED TO CLOUD!</h3>
+                    <p className="font-sans text-sm text-neutral-600">
+                      Your article is now stored in Firestore and visible on the website.
+                    </p>
+                  </div>
+                ) : (
+                  <form onSubmit={handlePublish} className="space-y-4">
+                    {publishError && (
+                      <div className="p-3 bg-red-100 border-2 border-red-500 font-mono text-xs text-red-800 font-bold">
+                        {publishError}
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">
+                        Article Title *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                        placeholder="e.g. Distributed Consensus in Modern Microservices"
+                        className="w-full px-3.5 py-2.5 border-2 border-black font-sans font-bold text-base bg-white"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">
+                          Category *
+                        </label>
+                        <select
+                          value={newCategory}
+                          onChange={(e) => setNewCategory(e.target.value as Category)}
+                          className="w-full px-3.5 py-2.5 border-2 border-black font-sans font-bold text-sm bg-white"
+                        >
+                          <option value="Web Development">Web Development</option>
+                          <option value="Artificial Intelligence">Artificial Intelligence</option>
+                          <option value="Software Engineering">Software Engineering</option>
+                          <option value="Computer Science">Computer Science</option>
+                          <option value="Developer Tools">Developer Tools</option>
+                          <option value="System Design">System Design</option>
+                        </select>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="font-mono text-xs font-bold uppercase text-black">
+                          Reading Time (Minutes)
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="60"
+                          value={newReadingTime}
+                          onChange={(e) => setNewReadingTime(Number(e.target.value))}
+                          className="w-full px-3.5 py-2.5 border-2 border-black font-mono text-sm bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">
+                        Tags (Comma Separated)
+                      </label>
+                      <input
+                        type="text"
+                        value={newTags}
+                        onChange={(e) => setNewTags(e.target.value)}
+                        placeholder="e.g. Distributed Systems, Rust, High Performance"
+                        className="w-full px-3.5 py-2.5 border-2 border-black font-mono text-xs bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">
+                        Excerpt / Executive Abstract *
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={newExcerpt}
+                        onChange={(e) => setNewExcerpt(e.target.value)}
+                        placeholder="Write a punchy, high-density summary of this architectural dispatch..."
+                        className="w-full px-3.5 py-2.5 border-2 border-black font-sans text-sm bg-white"
+                      />
+                    </div>
+
+                    {/* Cover Image Input with Storage Upload Option */}
+                    <div className="space-y-2 border-2 border-black p-3 bg-neutral-50">
+                      <label className="font-mono text-xs font-bold uppercase text-black block">
+                        Cover Image
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="url"
+                          value={newCoverImage}
+                          onChange={(e) => setNewCoverImage(e.target.value)}
+                          placeholder="https://images.unsplash.com/..."
+                          className="flex-1 px-3 py-2 border-2 border-black font-mono text-xs bg-white"
+                        />
+                        <label className="cursor-pointer px-4 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors flex items-center space-x-1">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{isUploadingCover ? 'UPLOADING...' : 'UPLOAD'}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={handleCoverUpload} 
+                            className="hidden" 
+                            disabled={isUploadingCover}
+                          />
+                        </label>
+                      </div>
+
+                      {newCoverImage && (
+                        <div className="mt-2">
+                          <img 
+                            src={newCoverImage} 
+                            alt="Cover preview" 
+                            className="w-full h-36 object-cover border-2 border-black" 
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">
+                        Article Body (Paragraph 1)
+                      </label>
+                      <textarea
+                        rows={6}
+                        value={newParagraph1}
+                        onChange={(e) => setNewParagraph1(e.target.value)}
+                        placeholder="Detailed technical essay content..."
+                        className="w-full px-3.5 py-2.5 border-2 border-black font-serif text-sm bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-2 border-2 border-black p-3 bg-neutral-50">
+                      <div className="flex items-center justify-between">
+                        <label className="font-mono text-xs font-bold uppercase text-black">
+                          Optional Code Snippet Block
+                        </label>
+                        <select
+                          value={newCodeLanguage}
+                          onChange={(e) => setNewCodeLanguage(e.target.value)}
+                          className="px-2 py-1 border border-black font-mono text-xs bg-white"
+                        >
+                          <option value="typescript">TypeScript</option>
+                          <option value="javascript">JavaScript</option>
+                          <option value="rust">Rust</option>
+                          <option value="go">Go</option>
+                          <option value="python">Python</option>
+                          <option value="json">JSON</option>
+                        </select>
+                      </div>
+                      <textarea
+                        rows={4}
+                        value={newCodeSnippet}
+                        onChange={(e) => setNewCodeSnippet(e.target.value)}
+                        placeholder="// Enter code here..."
+                        className="w-full px-3 py-2 border-2 border-black font-mono text-xs bg-white"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase text-black">
+                        Key Engineering Takeaway
+                      </label>
+                      <input
+                        type="text"
+                        value={newTakeaway}
+                        onChange={(e) => setNewTakeaway(e.target.value)}
+                        placeholder="e.g. Decouple bundle generation from runtime execution to achieve zero cold starts."
+                        className="w-full px-3.5 py-2.5 border-2 border-black font-sans text-sm bg-white"
+                      />
+                    </div>
+
+                    <div className="flex items-center space-x-3 pt-2">
+                      <button
+                        type="submit"
+                        disabled={isPublishing}
+                        className="flex-1 py-3.5 bg-[var(--color-primary)] text-black font-display font-black text-sm uppercase neo-border neo-shadow-sm hover:bg-[var(--color-secondary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all disabled:opacity-50"
+                      >
+                        {isPublishing ? 'PERSISTING TO FIRESTORE...' : (editingArticleSlug ? 'UPDATE ARTICLE IN FIRESTORE' : 'PUBLISH ARTICLE TO FIRESTORE')}
+                      </button>
+                      
+                      {editingArticleSlug && (
+                        <button
+                          type="button"
+                          onClick={resetForm}
+                          className="px-6 py-3.5 bg-neutral-200 text-black font-display font-black text-sm uppercase neo-border hover:bg-neutral-300"
+                        >
+                          CANCEL
+                        </button>
+                      )}
+                    </div>
+                  </form>
+                )}
+              </div>
+            )}
+
+            {/* TAB: MANAGE ARTICLES */}
+            {activeTab === 'manage' && (
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-4">
+                <div className="flex items-center justify-between border-b-2 border-black pb-2">
+                  <h3 className="font-display font-black text-lg uppercase">
+                    All Published Dispatches ({articles.length})
+                  </h3>
+                  <button
+                    onClick={() => {
+                      resetForm();
+                      setActiveTab('create');
+                    }}
+                    className="px-3 py-1 bg-[var(--color-primary)] border-2 border-black font-mono text-xs font-bold uppercase hover:bg-neutral-200"
+                  >
+                    + Write New
                   </button>
                 </div>
-              </div>
 
-              {isLoadingCarousel ? (
-                <div className="py-12 flex justify-center"><RefreshCw className="w-8 h-8 animate-spin" /></div>
-              ) : carouselSlides.length === 0 ? (
-                <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500">
-                  No carousel slides found. Add one above.
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {carouselSlides.map((slide, index) => (
-                    <div key={slide.id} className="flex items-center gap-4 bg-white border-2 border-black p-3">
-                      <div className="flex flex-col gap-1">
-                        <button onClick={() => handleMoveSlide(index, -1)} disabled={index === 0} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
-                        <button onClick={() => handleMoveSlide(index, 1)} disabled={index === carouselSlides.length - 1} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
-                      </div>
-                      <img src={slide.imageUrl} alt={slide.title} className="w-24 h-16 object-cover border-2 border-black bg-neutral-100" />
+                <div className="space-y-3">
+                  {articles.map((art) => (
+                    <div 
+                      key={art.slug} 
+                      className="p-4 border-2 border-black bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 neo-shadow-sm"
+                    >
                       <div className="flex-1 min-w-0">
-                        <div className="font-display font-bold text-sm truncate">{slide.title || 'Untitled Slide'}</div>
-                        <div className="font-mono text-xs text-neutral-500 truncate">{slide.linkUrl}</div>
+                        <div className="flex items-center space-x-2 mb-1">
+                          <span className="bg-black text-white font-mono text-[9px] font-bold px-1.5 py-0.5 uppercase">
+                            {art.category}
+                          </span>
+                          <span className="font-mono text-[10px] text-neutral-500">
+                            {art.publishedAt}
+                          </span>
+                        </div>
+                        <h4 className="font-display font-black text-base truncate text-black">
+                          {art.title}
+                        </h4>
+                        <p className="font-sans text-xs text-neutral-600 line-clamp-1">
+                          {art.excerpt}
+                        </p>
                       </div>
-                      <button onClick={() => handleDeleteSlide(slide.id)} className="p-2 text-red-600 hover:bg-red-50">
-                        <Trash2 className="w-5 h-5" />
-                      </button>
+
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleEditArticle(art)}
+                          className="px-3 py-1.5 bg-white border-2 border-black font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] transition-colors flex items-center space-x-1"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                          <span>EDIT</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteArticleClick(art.slug)}
+                          className="px-3 py-1.5 bg-[var(--color-accent)] border-2 border-black font-mono text-xs font-bold uppercase text-black hover:bg-black hover:text-white transition-colors flex items-center space-x-1"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>DELETE</span>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tab 1: Quick Article Creator */}
-        {activeTab === 'create' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
-            <div className="bg-[var(--color-primary)]/30 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
-              <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
-                <Smartphone className="w-4 h-4 text-black" />
-                <span>MOBILE-READY CMS PUBLISHING</span>
               </div>
-              <p>
-                Write and publish new technical articles on the fly from your phone or desktop. Articles publish instantly to KRISHFICIENT without redeploying code.
-              </p>
-            </div>
+            )}
 
-            {publishSuccess ? (
-              <div className="py-12 text-center bg-white neo-border p-8 space-y-3">
-                <div className="w-12 h-12 bg-[var(--color-success)] neo-border-2 flex items-center justify-center mx-auto neo-shadow-sm">
-                  <Check className="w-6 h-6 text-black stroke-[3]" />
-                </div>
-                <h3 className="font-display font-black text-2xl uppercase text-black">ARTICLE PUBLISHED!</h3>
-                <p className="font-sans text-sm text-neutral-600">
-                  Your new dispatch is now live on KRISHFICIENT.
-                </p>
-              </div>
-            ) : (
-              <form onSubmit={handlePublish} className="space-y-4">
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">
-                    Article Title *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="e.g. Distributed Consensus in Modern Rust Microservices"
-                    className="w-full px-3.5 py-2.5 border-2 border-black font-display font-bold text-base focus:outline-none focus:bg-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">
-                      Category *
-                    </label>
-                    <select
-                      value={newCategory}
-                      onChange={(e: any) => setNewCategory(e.target.value)}
-                      className="w-full px-3 py-2.5 border-2 border-black font-display font-bold text-sm bg-white focus:outline-none"
-                    >
-                      <option value="Web Development">Web Development</option>
-                      <option value="Artificial Intelligence">Artificial Intelligence</option>
-                      <option value="Software Engineering">Software Engineering</option>
-                      <option value="Computer Science">Computer Science</option>
-                      <option value="Developer Tools">Developer Tools</option>
-                      <option value="System Design">System Design</option>
-                    </select>
+            {/* TAB: BENTO LINKS */}
+            {activeTab === 'links' && (
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
+                <div className="bg-[var(--color-primary)]/20 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
+                  <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
+                    <LinkIcon className="w-4 h-4 text-black" />
+                    <span>BENTO SOCIAL &amp; RESOURCE GRID</span>
                   </div>
+                  <p>Manage the high-impact social links on the `/links` page. Synced globally to Firestore.</p>
+                </div>
 
+                <form onSubmit={handleAddBentoLink} className="space-y-4 p-4 border-2 border-black bg-neutral-50">
+                  <h4 className="font-display font-black text-sm uppercase">Add New Bento Link</h4>
+                  
                   <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">
-                      Tags (Comma separated)
-                    </label>
-                    <input
-                      type="text"
-                      value={newTags}
-                      onChange={(e) => setNewTags(e.target.value)}
-                      placeholder="Rust, Systems, Concurrency"
-                      className="w-full px-3.5 py-2.5 border-2 border-black font-sans text-sm focus:outline-none focus:bg-white"
+                    <label className="font-mono text-xs font-bold uppercase">Title *</label>
+                    <input 
+                      type="text" 
+                      required 
+                      value={bentoTitle} 
+                      onChange={e => setBentoTitle(e.target.value)} 
+                      placeholder="e.g. GitHub Architecture Repos" 
+                      className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white text-sm" 
                     />
                   </div>
-                </div>
 
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">
-                    Excerpt / Editorial Abstract *
-                  </label>
-                  <textarea
-                    required
-                    rows={2}
-                    value={newExcerpt}
-                    onChange={(e) => setNewExcerpt(e.target.value)}
-                    placeholder="A punchy 2-sentence summary that appears on cards and social previews..."
-                    className="w-full p-3 border-2 border-black font-sans text-sm focus:outline-none focus:bg-white"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">
-                      Cover Image URL
-                    </label>
-                    <input
-                      type="url"
-                      value={newCoverImage}
-                      onChange={(e) => setNewCoverImage(e.target.value)}
-                      placeholder="https://..."
-                      className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none"
+                    <label className="font-mono text-xs font-bold uppercase">Target URL *</label>
+                    <input 
+                      type="url" 
+                      required 
+                      value={bentoUrl} 
+                      onChange={e => setBentoUrl(e.target.value)} 
+                      placeholder="https://github.com/..." 
+                      className="w-full px-3 py-2 border-2 border-black font-mono focus:outline-none bg-white text-xs" 
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">
-                      Est. Reading Time (Minutes)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={60}
-                      value={newReadingTime}
-                      onChange={(e) => setNewReadingTime(Number(e.target.value))}
-                      className="w-full px-3 py-2 border-2 border-black font-mono text-sm focus:outline-none"
-                    />
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase">Icon</label>
+                      <select value={bentoIcon} onChange={e => setBentoIcon(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white text-sm">
+                        <option value="link">Link (Default)</option>
+                        <option value="github">GitHub</option>
+                        <option value="twitter">Twitter / X</option>
+                        <option value="youtube">YouTube</option>
+                        <option value="podcast">Podcast</option>
+                        <option value="mail">Newsletter / Mail</option>
+                        <option value="globe">Website</option>
+                        <option value="linkedin">LinkedIn</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="font-mono text-xs font-bold uppercase">Color (Hex)</label>
+                      <div className="flex items-center space-x-2">
+                        <input type="color" value={bentoColor} onChange={e => setBentoColor(e.target.value)} className="w-10 h-10 border-2 border-black p-0.5 cursor-pointer" />
+                        <input type="text" value={bentoColor} onChange={e => setBentoColor(e.target.value)} className="flex-1 px-3 py-2 border-2 border-black font-mono uppercase focus:outline-none text-xs" />
+                      </div>
+                    </div>
                   </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">
-                    Main Content Paragraph
-                  </label>
-                  <textarea
-                    rows={4}
-                    value={newParagraph1}
-                    onChange={(e) => setNewParagraph1(e.target.value)}
-                    placeholder="Write the opening thoughts, architectural breakdown, and rationale..."
-                    className="w-full p-3 border-2 border-black font-sans text-sm focus:outline-none focus:bg-white"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex justify-between items-center">
-                    <label className="font-mono text-xs font-bold uppercase text-black">
-                      Optional Code Snippet
-                    </label>
-                    <select
-                      value={newCodeLanguage}
-                      onChange={(e) => setNewCodeLanguage(e.target.value)}
-                      className="text-xs font-mono border border-black px-2 py-0.5 bg-white"
-                    >
-                      <option value="typescript">TypeScript</option>
-                      <option value="python">Python</option>
-                      <option value="rust">Rust</option>
-                      <option value="sql">SQL</option>
-                      <option value="bash">Bash</option>
-                    </select>
+                  
+                  <div className="flex items-center space-x-2 pt-1">
+                    <input type="checkbox" id="isFeatured" checked={bentoIsFeatured} onChange={e => setBentoIsFeatured(e.target.checked)} className="w-4 h-4 border-2 border-black accent-[var(--color-primary)]" />
+                    <label htmlFor="isFeatured" className="font-mono text-xs font-bold uppercase cursor-pointer">Featured Link (Span Full Width)</label>
                   </div>
-                  <textarea
-                    rows={4}
-                    value={newCodeSnippet}
-                    onChange={(e) => setNewCodeSnippet(e.target.value)}
-                    placeholder="// Paste your production code snippet here"
-                    className="w-full p-3 border-2 border-black font-mono text-xs bg-[#0F172A] text-white focus:outline-none"
-                  />
-                </div>
 
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">
-                    Key Architectural Takeaway
-                  </label>
-                  <input
-                    type="text"
-                    value={newTakeaway}
-                    onChange={(e) => setNewTakeaway(e.target.value)}
-                    placeholder="e.g. Always benchmark query latency before choosing an LSM storage engine."
-                    className="w-full px-3.5 py-2.5 border-2 border-black font-sans text-sm focus:outline-none"
-                  />
-                </div>
-
-                <div className="flex space-x-3">
-                  <button
-                    type="submit"
-                    className="flex-1 py-3.5 bg-[var(--color-success)] text-black font-display font-black text-sm uppercase neo-border neo-shadow-sm hover:bg-[var(--color-primary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center space-x-2"
+                  <button 
+                    type="submit" 
+                    disabled={isSavingBento}
+                    className="w-full py-2.5 bg-[var(--color-success)] border-2 border-black font-display font-black text-sm uppercase hover:bg-black hover:text-[var(--color-success)] transition-colors disabled:opacity-50"
                   >
-                    <span>{editingArticleId ? 'UPDATE ESSAY' : 'PUBLISH ESSAY IMMEDIATELY'}</span>
-                    <PlusCircle className="w-4 h-4 stroke-[2.5]" />
+                    {isSavingBento ? 'SAVING...' : 'ADD LINK TO CLOUD'}
                   </button>
-                  {editingArticleId && (
-                    <button
-                      type="button"
-                      onClick={resetForm}
-                      className="px-6 py-3.5 bg-neutral-200 text-black font-display font-black text-sm uppercase neo-border neo-shadow-sm hover:bg-neutral-300 active:translate-x-1 active:translate-y-1 active:shadow-none transition-all"
-                    >
-                      CANCEL
-                    </button>
+                </form>
+
+                <div className="space-y-3 pt-2 border-t-2 border-black">
+                  <h4 className="font-display font-black text-sm uppercase mb-2">Current Bento Links</h4>
+                  {[...bentoLinks].sort((a, b) => a.order - b.order).map((link, index, arr) => (
+                    <div key={link.id} className="flex items-center justify-between p-3 border-2 border-black bg-white neo-shadow-sm">
+                      <div className="flex items-center space-x-3 overflow-hidden">
+                        <div className="w-4 h-4 rounded-full border border-black flex-shrink-0" style={{ backgroundColor: link.color }} />
+                        <div className="flex-1 truncate">
+                          <div className="font-bold text-sm truncate flex items-center space-x-2">
+                            <span>{link.title}</span>
+                            {link.isFeatured && <span className="bg-[var(--color-primary)] px-1.5 py-0.5 text-[9px] font-mono border border-black uppercase">Featured</span>}
+                          </div>
+                          <div className="font-mono text-[10px] text-neutral-500 truncate">{link.url}</div>
+                        </div>
+                      </div>
+                      <div className="flex space-x-1.5 ml-2">
+                        <button
+                          onClick={() => handleMoveBentoLink(index, 'up')}
+                          disabled={index === 0}
+                          className="p-1.5 border-2 border-black hover:bg-neutral-200 disabled:opacity-30"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleMoveBentoLink(index, 'down')}
+                          disabled={index === arr.length - 1}
+                          className="p-1.5 border-2 border-black hover:bg-neutral-200 disabled:opacity-30"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteBentoLink(link.id)}
+                          className="p-1.5 bg-[var(--color-accent)] border-2 border-black hover:bg-black hover:text-white transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {bentoLinks.length === 0 && (
+                    <p className="font-mono text-xs text-neutral-500">No links stored in database.</p>
                   )}
                 </div>
-              </form>
-            )}
-          </div>
-        )}
-
-        {/* Tab: Settings */}
-        {activeTab === 'settings' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
-            <div className="bg-[var(--color-secondary)]/30 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
-              <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
-                <Settings className="w-4 h-4 text-black" />
-                <span>GLOBAL SITE CONFIGURATION</span>
-              </div>
-              <p>Update site logos, branding, and the homepage hero section.</p>
-            </div>
-
-            {configSuccess && (
-              <div className="p-3 bg-[var(--color-success)] border-2 border-black font-mono text-xs font-bold flex items-center space-x-2 neo-shadow-sm">
-                <Check className="w-4 h-4" />
-                <span>Settings saved successfully!</span>
               </div>
             )}
 
-            <form onSubmit={handleSaveConfig} className="space-y-6">
-              {/* BRANDING SECTION */}
-              <div className="space-y-4">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Branding</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Logo Image URL (Optional)</label>
-                  <input type="text" value={logoImageUrl} onChange={(e) => setLogoImageUrl(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" placeholder="https://..." />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Logo Part 1</label>
-                    <input type="text" value={logoPart1} onChange={(e) => setLogoPart1(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Logo Part 2 (Accent)</label>
-                    <input type="text" value={logoPart2} onChange={(e) => setLogoPart2(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none text-[var(--color-accent)]" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Tagline</label>
-                  <input type="text" value={tagline} onChange={(e) => setTagline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-              </div>
+            {/* TAB: CAROUSEL */}
+            {activeTab === 'carousel' && (
+              <div className="p-6 max-h-[70vh] overflow-y-auto space-y-8 bg-neutral-50">
+                <div>
+                  <h2 className="font-display font-black text-2xl uppercase tracking-tight mb-2">Featured Carousel Slides</h2>
+                  <p className="font-sans text-sm text-neutral-600 mb-6">Manage the auto-sliding promotional banners shown on the home page. Synced globally to Firestore.</p>
 
-              {/* HERO SECTION */}
-              <div className="space-y-4">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Hero Section</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Hero Headline</label>
-                  <textarea rows={2} value={heroHeadline} onChange={(e) => setHeroHeadline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-display font-bold text-lg focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Hero Subheadline</label>
-                  <textarea rows={3} value={heroSubheadline} onChange={(e) => setHeroSubheadline(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Hero Background Color (Hex)</label>
-                  <div className="flex items-center space-x-2">
-                    <input type="color" value={heroBgColor} onChange={(e) => setHeroBgColor(e.target.value)} className="w-10 h-10 border-2 border-black p-0.5 cursor-pointer" />
-                    <input type="text" value={heroBgColor} onChange={(e) => setHeroBgColor(e.target.value)} className="flex-1 px-3 py-2 border-2 border-black font-mono focus:outline-none uppercase" />
-                  </div>
-                </div>
-              </div>
-
-              {/* MANIFESTO SECTION */}
-              <div className="space-y-4">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Terminal Manifesto</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Manifesto Text</label>
-                  <textarea rows={3} value={manifestoText} onChange={(e) => setManifestoText(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-serif text-sm focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Manifesto Author</label>
-                  <input type="text" value={manifestoAuthor} onChange={(e) => setManifestoAuthor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-              </div>
-
-              {/* ABOUT SECTION */}
-              <div className="space-y-4">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">About Me Page</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">About Section Title</label>
-                  <input type="text" value={aboutMeTitle} onChange={(e) => setAboutMeTitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Author Name</label>
-                    <input type="text" value={authorName} onChange={(e) => setAuthorName(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Author Role</label>
-                    <input type="text" value={authorRole} onChange={(e) => setAuthorRole(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Author Avatar URL</label>
-                  <input type="text" value={authorAvatarUrl} onChange={(e) => setAuthorAvatarUrl(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" placeholder="https://..." />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">About Me Bio (Use double line breaks for paragraphs)</label>
-                  <textarea rows={6} value={aboutMeBio} onChange={(e) => setAboutMeBio(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-serif text-sm focus:outline-none" />
-                </div>
-              </div>
-
-              {/* COLORS SECTION */}
-              <div className="space-y-4 pt-4 border-t-2 border-black">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Site Colors</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Primary (Yellow)</label>
-                    <input type="text" value={themePrimaryColor} onChange={(e) => setThemePrimaryColor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Secondary (Cyan)</label>
-                    <input type="text" value={themeSecondaryColor} onChange={(e) => setThemeSecondaryColor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Accent (Pink)</label>
-                    <input type="text" value={themeAccentColor} onChange={(e) => setThemeAccentColor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Success (Green)</label>
-                    <input type="text" value={themeSuccessColor} onChange={(e) => setThemeSuccessColor(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                </div>
-              </div>
-
-              {/* FOOTER SECTION */}
-              <div className="space-y-4 pt-4 border-t-2 border-black">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Footer Settings</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Newsletter Title</label>
-                  <input type="text" value={footerNewsletterTitle} onChange={(e) => setFooterNewsletterTitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Newsletter Subtitle</label>
-                  <input type="text" value={footerNewsletterSubtitle} onChange={(e) => setFooterNewsletterSubtitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Brand Statement</label>
-                  <textarea rows={3} value={footerBrandStatement} onChange={(e) => setFooterBrandStatement(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-              </div>
-
-              {/* CONTACT SECTION */}
-              <div className="space-y-4 pt-4 border-t-2 border-black">
-                <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Contact Page</h4>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Title</label>
-                  <input type="text" value={contactTitle} onChange={(e) => setContactTitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase text-black">Subtitle</label>
-                  <input type="text" value={contactSubtitle} onChange={(e) => setContactSubtitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Email</label>
-                    <input type="text" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Twitter/X</label>
-                    <input type="text" value={contactTwitter} onChange={(e) => setContactTwitter(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">GitHub</label>
-                    <input type="text" value={contactGithub} onChange={(e) => setContactGithub(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="font-mono text-xs font-bold uppercase text-black">Telegram</label>
-                    <input type="text" value={contactTelegram} onChange={(e) => setContactTelegram(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                  </div>
-                </div>
-              </div>
-
-              {/* BACKUP / RESTORE SECTION */}
-              <div className="space-y-4 pt-4 border-t-2 border-black">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-display font-black text-lg uppercase">Backup & Restore</h4>
-                  <button type="button" onClick={() => {
-                      if (!showBackupUI) {
-                        setBackupJson(JSON.stringify({
-                          logoImageUrl, logoPart1, logoPart2, tagline, heroHeadline, heroSubheadline, heroBgColor,
-                          manifestoText, manifestoAuthor, authorName, authorRole, authorAvatarUrl, aboutMeTitle, aboutMeBio,
-                          themePrimaryColor, themeSecondaryColor, themeAccentColor, themeSuccessColor,
-                          footerNewsletterTitle, footerNewsletterSubtitle, footerBrandStatement,
-                          contactTitle, contactSubtitle, contactEmail, contactTwitter, contactGithub, contactTelegram
-                        }, null, 2));
-                      }
-                      setShowBackupUI(!showBackupUI);
-                    }} className="text-xs font-mono font-bold bg-neutral-200 px-2 py-1 border-2 border-black">
-                    {showBackupUI ? 'HIDE' : 'SHOW JSON'}
-                  </button>
-                </div>
-                {showBackupUI && (
-                  <div className="space-y-2 bg-neutral-50 p-4 border-2 border-black">
-                    <p className="font-mono text-[10px] text-neutral-600 mb-2 leading-relaxed">
-                      Copy the JSON below to backup your settings, or paste a previously saved JSON configuration and click "Import Configuration" to load it.
-                    </p>
-                    <textarea
-                      rows={8}
-                      value={backupJson}
-                      onChange={(e) => setBackupJson(e.target.value)}
-                      className="w-full px-3 py-2 border-2 border-black font-mono text-[10px] focus:outline-none"
-                      placeholder="Paste configuration JSON here..."
-                    />
-                    <div className="flex flex-col sm:flex-row gap-2 mt-2">
-                      <button type="button" onClick={() => {
-                          navigator.clipboard.writeText(backupJson);
-                          alert('Copied settings to clipboard!');
-                      }} className="flex-1 py-2 bg-black text-white font-display font-bold text-xs uppercase border-2 border-black hover:bg-neutral-800 transition-colors">
-                        Copy to Clipboard
-                      </button>
-                      <button type="button" onClick={() => {
-                          try {
-                            const parsed = JSON.parse(backupJson);
-                            if (parsed.logoImageUrl !== undefined) setLogoImageUrl(parsed.logoImageUrl);
-                            if (parsed.logoPart1 !== undefined) setLogoPart1(parsed.logoPart1);
-                            if (parsed.logoPart2 !== undefined) setLogoPart2(parsed.logoPart2);
-                            if (parsed.tagline !== undefined) setTagline(parsed.tagline);
-                            if (parsed.heroHeadline !== undefined) setHeroHeadline(parsed.heroHeadline);
-                            if (parsed.heroSubheadline !== undefined) setHeroSubheadline(parsed.heroSubheadline);
-                            if (parsed.heroBgColor !== undefined) setHeroBgColor(parsed.heroBgColor);
-                            if (parsed.manifestoText !== undefined) setManifestoText(parsed.manifestoText);
-                            if (parsed.manifestoAuthor !== undefined) setManifestoAuthor(parsed.manifestoAuthor);
-                            if (parsed.authorName !== undefined) setAuthorName(parsed.authorName);
-                            if (parsed.authorRole !== undefined) setAuthorRole(parsed.authorRole);
-                            if (parsed.authorAvatarUrl !== undefined) setAuthorAvatarUrl(parsed.authorAvatarUrl);
-                            if (parsed.aboutMeTitle !== undefined) setAboutMeTitle(parsed.aboutMeTitle);
-                            if (parsed.aboutMeBio !== undefined) setAboutMeBio(parsed.aboutMeBio);
-                            if (parsed.themePrimaryColor !== undefined) setThemePrimaryColor(parsed.themePrimaryColor);
-                            if (parsed.themeSecondaryColor !== undefined) setThemeSecondaryColor(parsed.themeSecondaryColor);
-                            if (parsed.themeAccentColor !== undefined) setThemeAccentColor(parsed.themeAccentColor);
-                            if (parsed.themeSuccessColor !== undefined) setThemeSuccessColor(parsed.themeSuccessColor);
-                            if (parsed.footerNewsletterTitle !== undefined) setFooterNewsletterTitle(parsed.footerNewsletterTitle);
-                            if (parsed.footerNewsletterSubtitle !== undefined) setFooterNewsletterSubtitle(parsed.footerNewsletterSubtitle);
-                            if (parsed.footerBrandStatement !== undefined) setFooterBrandStatement(parsed.footerBrandStatement);
-                            if (parsed.contactTitle !== undefined) setContactTitle(parsed.contactTitle);
-                            if (parsed.contactSubtitle !== undefined) setContactSubtitle(parsed.contactSubtitle);
-                            if (parsed.contactEmail !== undefined) setContactEmail(parsed.contactEmail);
-                            if (parsed.contactTwitter !== undefined) setContactTwitter(parsed.contactTwitter);
-                            if (parsed.contactGithub !== undefined) setContactGithub(parsed.contactGithub);
-                            if (parsed.contactTelegram !== undefined) setContactTelegram(parsed.contactTelegram);
-                            alert('Configuration imported! Scroll down and click "SAVE SETTINGS" to apply them globally.');
-                          } catch (e) {
-                            alert('Invalid JSON format. Please check the structure and try again.');
-                          }
-                      }} className="flex-1 py-2 bg-[var(--color-primary)] text-black font-display font-black text-xs uppercase border-2 border-black hover:bg-[var(--color-secondary)] transition-colors">
-                        Import Configuration
-                      </button>
+                  <div className="bg-white border-2 border-black p-4 shadow-[4px_4px_0_0_#000] mb-8 space-y-4">
+                    <h3 className="font-mono text-sm font-bold uppercase mb-2">Add New Slide</h3>
+                    
+                    <div>
+                      <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Title</label>
+                      <input 
+                        type="text" 
+                        value={newSlideTitle}
+                        onChange={(e) => setNewSlideTitle(e.target.value)}
+                        placeholder="e.g. Distributed Systems Masterclass"
+                        className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                      />
                     </div>
-                  </div>
-                )}
-              </div>
 
-              <button
-                type="submit"
-                className="w-full py-3 bg-[var(--color-secondary)] text-black font-display font-black text-sm uppercase neo-border neo-shadow-sm hover:bg-[var(--color-primary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex items-center justify-center space-x-2 mt-6"
-              >
-                <Check className="w-4 h-4 stroke-[2.5]" />
-                <span>SAVE SETTINGS</span>
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* Tab: Manage Posts */}
-        {activeTab === 'manage' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-4">
-            <h3 className="font-display font-black text-xl uppercase border-b-4 border-black pb-2 mb-4">
-              MANAGE POSTS
-            </h3>
-            {articles.length === 0 ? (
-              <p className="font-mono text-xs text-neutral-500">No articles available.</p>
-            ) : (
-              <div className="space-y-3">
-                {articles.map((article) => (
-                  <div key={article.id} className="flex items-center justify-between p-3 border-2 border-black neo-shadow-sm bg-white">
-                    <div className="flex-1 truncate pr-4">
-                      <div className="font-bold text-sm truncate">{article.title}</div>
-                      <div className="font-mono text-[10px] text-neutral-500">{article.category} &bull; {article.publishedAt}</div>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handleEditArticle(article)}
-                        className="p-2 bg-[var(--color-primary)] hover:bg-black hover:text-white border-2 border-black neo-shadow-sm transition-colors active:translate-x-0.5 active:translate-y-0.5"
-                        title="Edit Article"
-                      >
-                        <Settings className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => onDeleteArticle(article.slug)}
-                        className="p-2 bg-[var(--color-accent)] hover:bg-black hover:text-white border-2 border-black neo-shadow-sm transition-colors active:translate-x-0.5 active:translate-y-0.5"
-                        title="Delete Article"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tab: Bento Links */}
-        {activeTab === 'links' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
-            <div className="bg-[var(--color-success)]/30 p-3.5 neo-border-2 font-sans text-xs text-black space-y-1">
-              <div className="font-display font-black text-sm uppercase flex items-center space-x-1.5">
-                <LinkIcon className="w-4 h-4 text-black" />
-                <span>MY LINKS (BENTO BOX)</span>
-              </div>
-              <p>Manage promotional links, social profiles, and featured content.</p>
-            </div>
-
-            <form onSubmit={handleAddBentoLink} className="space-y-4 bg-neutral-50 p-4 border-2 border-black neo-shadow-sm">
-              <h4 className="font-display font-black text-sm uppercase">Add New Link</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase">Title</label>
-                  <input type="text" value={bentoTitle} onChange={e => setBentoTitle(e.target.value)} placeholder="e.g. Follow on X" className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase">URL</label>
-                  <input type="text" value={bentoUrl} onChange={e => setBentoUrl(e.target.value)} placeholder="https://..." className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase">Icon</label>
-                  <select value={bentoIcon} onChange={e => setBentoIcon(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white">
-                    <option value="link">Link (Default)</option>
-                    <option value="instagram">Instagram</option>
-                    <option value="twitter">Twitter / X</option>
-                    <option value="github">GitHub</option>
-                    <option value="youtube">YouTube</option>
-                    <option value="music">Music / Spotify</option>
-                    <option value="globe">Globe / Website</option>
-                    <option value="linkedin">LinkedIn</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-mono text-xs font-bold uppercase">Color (Hex)</label>
-                  <div className="flex items-center space-x-2">
-                    <input type="color" value={bentoColor} onChange={e => setBentoColor(e.target.value)} className="w-10 h-10 border-2 border-black p-0.5 cursor-pointer" />
-                    <input type="text" value={bentoColor} onChange={e => setBentoColor(e.target.value)} className="flex-1 px-3 py-2 border-2 border-black font-mono uppercase focus:outline-none text-xs" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex items-center space-x-2 pt-1">
-                <input type="checkbox" id="isFeatured" checked={bentoIsFeatured} onChange={e => setBentoIsFeatured(e.target.checked)} className="w-4 h-4 border-2 border-black accent-[var(--color-primary)]" />
-                <label htmlFor="isFeatured" className="font-mono text-xs font-bold uppercase cursor-pointer">Featured Link (Larger Display)</label>
-              </div>
-
-              <button type="submit" className="w-full py-2 bg-[var(--color-success)] border-2 border-black font-display font-black text-sm uppercase hover:bg-black hover:text-[var(--color-success)] transition-colors">
-                ADD LINK
-              </button>
-            </form>
-
-            <div className="space-y-3 pt-2 border-t-2 border-black">
-              <h4 className="font-display font-black text-sm uppercase mb-2">Current Links</h4>
-              {[...bentoLinks].sort((a, b) => a.order - b.order).map((link, index, arr) => (
-                <div key={link.id} className="flex items-center justify-between p-3 border-2 border-black bg-white neo-shadow-sm">
-                  <div className="flex items-center space-x-3 overflow-hidden">
-                    <div className="w-4 h-4 rounded-full border border-black" style={{ backgroundColor: link.color }} />
-                    <div className="flex-1 truncate">
-                      <div className="font-bold text-sm truncate flex items-center space-x-2">
-                        <span>{link.title}</span>
-                        {link.isFeatured && <span className="bg-[var(--color-primary)] px-1.5 py-0.5 text-[9px] font-mono border border-black uppercase">Featured</span>}
+                    <div>
+                      <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Image (Upload or URL)</label>
+                      <div className="flex gap-2">
+                        <input 
+                          type="url" 
+                          value={newSlideImageUrl}
+                          onChange={(e) => setNewSlideImageUrl(e.target.value)}
+                          placeholder="https://images.unsplash.com/..."
+                          className="flex-1 px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                        />
+                        <label className="cursor-pointer px-4 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors flex items-center space-x-1">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{isUploadingSlideImage ? 'UPLOADING...' : 'UPLOAD'}</span>
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={handleSlideUpload} 
+                            className="hidden" 
+                            disabled={isUploadingSlideImage}
+                          />
+                        </label>
                       </div>
-                      <div className="font-mono text-[10px] text-neutral-500 truncate">{link.url}</div>
                     </div>
-                  </div>
-                  <div className="flex space-x-1.5 ml-2">
+
+                    <div>
+                      <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
+                      <input 
+                        type="url" 
+                        value={newSlideLinkUrl}
+                        onChange={(e) => setNewSlideLinkUrl(e.target.value)}
+                        placeholder="https://example.com/promo"
+                        className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                      />
+                    </div>
+
                     <button
-                      onClick={() => handleMoveBentoLink(index, 'up')}
-                      disabled={index === 0}
-                      className="p-1.5 border-2 border-black hover:bg-neutral-200 disabled:opacity-30"
+                      onClick={handleAddSlide}
+                      className="px-6 py-2.5 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors"
                     >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleMoveBentoLink(index, 'down')}
-                      disabled={index === arr.length - 1}
-                      className="p-1.5 border-2 border-black hover:bg-neutral-200 disabled:opacity-30"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteBentoLink(link.id)}
-                      className="p-1.5 bg-[var(--color-accent)] border-2 border-black hover:bg-black hover:text-white transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      Add Slide to Firestore
                     </button>
                   </div>
+
+                  {isLoadingCarousel ? (
+                    <div className="py-12 flex justify-center"><RefreshCw className="w-8 h-8 animate-spin" /></div>
+                  ) : carouselSlides.length === 0 ? (
+                    <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500">
+                      No carousel slides found in Firestore. Add one above.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {carouselSlides.map((slide, index) => (
+                        <div key={slide.id} className="flex items-center gap-4 bg-white border-2 border-black p-3">
+                          <div className="flex flex-col gap-1">
+                            <button onClick={() => handleMoveSlide(index, -1)} disabled={index === 0} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
+                            <button onClick={() => handleMoveSlide(index, 1)} disabled={index === carouselSlides.length - 1} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
+                          </div>
+                          <img src={slide.imageUrl} alt={slide.title} className="w-24 h-16 object-cover border-2 border-black bg-neutral-100" />
+                          <div className="flex-1 min-w-0">
+                            <div className="font-display font-bold text-sm truncate">{slide.title || 'Untitled Slide'}</div>
+                            <div className="font-mono text-xs text-neutral-500 truncate">{slide.linkUrl}</div>
+                          </div>
+                          <button onClick={() => handleDeleteSlide(slide.id)} className="p-2 text-red-600 hover:bg-red-50">
+                            <Trash2 className="w-5 h-5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
-              {bentoLinks.length === 0 && (
-                <p className="font-mono text-xs text-neutral-500">No links added yet.</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tab: Sanity Cloud Configuration */}
-        {activeTab === 'sanity' && (
-          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
-            <div className="bg-white neo-border-2 p-4 space-y-2">
-              <h3 className="font-display font-black text-base uppercase text-black">
-                CONNECT TO HOSTED SANITY.IO
-              </h3>
-              <p className="font-sans text-xs text-neutral-600 leading-relaxed">
-                Connect your live Sanity project by entering your Project ID and dataset below.
-                The app will automatically query your Sanity GROQ API and fall back to local content if unavailable.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <label className="font-mono text-xs font-bold uppercase text-black">
-                  Sanity Project ID
-                </label>
-                <input
-                  type="text"
-                  value={projectId}
-                  onChange={(e) => setProjectId(e.target.value)}
-                  placeholder="e.g. 9b8x21a0"
-                  className="w-full px-3.5 py-2.5 border-2 border-black font-mono text-sm bg-white"
-                />
-                <span className="font-mono text-[11px] text-neutral-500">
-                  Found in your sanity.io/manage project dashboard
-                </span>
               </div>
+            )}
 
-              <div className="space-y-1">
-                <label className="font-mono text-xs font-bold uppercase text-black">
-                  Dataset Name
-                </label>
-                <input
-                  type="text"
-                  value={dataset}
-                  onChange={(e) => setDataset(e.target.value)}
-                  placeholder="production"
-                  className="w-full px-3.5 py-2.5 border-2 border-black font-mono text-sm bg-white"
-                />
-              </div>
-
-              <button
-                onClick={testConnection}
-                className="px-6 py-2.5 bg-[var(--color-primary)] text-black font-display font-black text-xs uppercase neo-border neo-shadow-sm hover:bg-[var(--color-secondary)] active:translate-x-1 active:translate-y-1 active:shadow-none transition-all flex items-center space-x-2"
-              >
-                <span>TEST CONNECTION</span>
-              </button>
-
-              {connectionStatus !== 'idle' && (
-                <div className={`p-4 border-2 border-black font-mono text-xs font-bold ${
-                  connectionStatus === 'success' ? 'bg-[var(--color-success)] text-black' :
-                  connectionStatus === 'checking' ? 'bg-[var(--color-secondary)] text-black' : 'bg-[var(--color-accent)] text-black'
-                }`}>
-                  {statusMessage}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-4 border-t-2 border-black space-y-2">
-              <h4 className="font-display font-black text-sm uppercase text-black">
-                HOW TO DEPLOY SANITY STUDIO:
-              </h4>
-              <ol className="list-decimal list-inside font-mono text-xs text-neutral-800 space-y-1.5 bg-neutral-100 p-3 border-2 border-black">
-                <li>Run <code>npm create sanity@latest</code> or use the included <code>sanity/</code> folder.</li>
-                <li>Copy <code>sanity/schemaTypes/post.ts</code> to your Sanity Studio schema.</li>
-                <li>Run <code>npx sanity deploy</code> to get your mobile CMS URL (e.g., <code>krishficient.sanity.studio</code>).</li>
-                <li>Add your Project ID in <code>.env</code> or this configuration tab!</li>
-              </ol>
-            </div>
           </div>
-        )}
-        
-        </div>
         )}
 
         {/* Modal Footer */}
         <div className="px-6 py-3 bg-neutral-100 border-t-4 border-black flex items-center justify-between text-xs font-mono text-neutral-600">
-          <span>KRISHFICIENT CMS ENGINE</span>
+          <span>KRISHFICIENT CLOUD CMS &bull; FIRESTORE ENGINE</span>
           <button
             onClick={onClose}
             className="font-bold text-black hover:underline uppercase"

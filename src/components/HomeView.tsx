@@ -3,7 +3,7 @@ import { Article, PageView, Category, SiteConfig, CommunityPost } from '../types
 import { Hero } from './Hero';
 import { ArticleCard } from './ArticleCard';
 import { NewsletterSignup } from './NewsletterSignup';
-import { getPosts, getCarouselSlides } from '../lib/community';
+import { getPosts, subscribeCarouselSlides } from '../lib/community';
 import { 
   Sparkles, 
   ArrowRight, 
@@ -132,12 +132,15 @@ export const HomeView: React.FC<HomeViewProps> = ({
       const featured = all.filter(p => p.isFeatured).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setFeaturedCommunityPosts(featured.slice(0, 3));
     };
-    const fetchSlides = async () => {
-      const slides = await getCarouselSlides();
-      setCarouselSlides(slides);
-    };
     fetchCommunityPosts();
-    fetchSlides();
+
+    const unsubCarousel = subscribeCarouselSlides((slides) => {
+      setCarouselSlides(slides);
+    });
+
+    return () => {
+      unsubCarousel();
+    };
   }, []);
 
   const featuredArticle = articles.find((a) => a.featured) || articles[0];

@@ -1,6 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Article, PageView, SiteConfig, BentoLink, CommunityUser } from './types';
-import { fetchArticles, getCustomLocalArticles, deleteCustomLocalArticle } from './lib/sanity';
+import { 
+  subscribeArticles, 
+  subscribeSiteConfig, 
+  subscribeBentoLinks, 
+  deleteArticle, 
+  saveSiteConfig, 
+  saveBentoLinks,
+  DEFAULT_SITE_CONFIG,
+  DEFAULT_BENTO_LINKS
+} from './lib/cms';
 import { Header } from './components/Header';
 import { MarqueeTicker } from './components/MarqueeTicker';
 import { HomeView } from './components/HomeView';
@@ -24,50 +33,6 @@ import { Loader2 } from 'lucide-react';
 
 const SAVED_SLUGS_KEY = 'krishficient_saved_slugs_v1';
 const SAVED_COMMUNITY_KEY = 'krishficient_saved_community_v1';
-const SITE_CONFIG_KEY = 'krishficient_site_config_v1';
-const BENTO_LINKS_KEY = 'krishficient_bento_links_v1';
-
-const DEFAULT_BENTO_LINKS: BentoLink[] = [
-  { id: '1', title: 'Follow on X', url: '#', icon: 'twitter', isFeatured: true, color: 'var(--color-secondary)', order: 1 },
-  { id: '2', title: 'GitHub Hub', url: '#', icon: 'github', isFeatured: false, color: '#ffffff', order: 2 },
-  { id: '3', title: 'Coding Playlist', url: '#', icon: 'music', isFeatured: false, color: 'var(--color-success)', order: 3 },
-];
-
-const DEFAULT_SITE_CONFIG: SiteConfig = {
-  logoImageUrl: "",
-  logoPart1: "KRISH",
-  logoPart2: "FICIENT",
-  tagline: "INDEPENDENT TECH PRESS",
-  heroHeadline: "Build. Learn.\nCreate.",
-  heroSubheadline: "A premium publication dedicated to software engineering, computer science, and the art of building practical technology.",
-  heroBgColor: "var(--color-secondary)",
-  manifestoText: "KRISHFICIENT exists to write the deep technical essays I wish I had found when architecting complex, scale-resistant systems.",
-  manifestoAuthor: "— Founder",
-  authorName: "KRISH",
-  authorRole: "Lead Architect & Researcher",
-  authorAvatarUrl: "https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=800&auto=format&fit=crop",
-  aboutMeTitle: "ABOUT THE AUTHOR",
-  aboutMeBio: "I am a software engineer and systems architect specializing in high-performance web applications and distributed systems.\n\nOver the past decade, I have built infrastructure that scales to millions of users, designed resilient microservices, and obsessed over web performance metrics.",
-  
-  // Advanced Global Settings Defaults
-  themePrimaryColor: "#FFD600",
-  themeSecondaryColor: "#00E0FF",
-  themeAccentColor: "#FF60B5",
-  themeSuccessColor: "#00FF41",
-  
-  // Footer Defaults
-  footerNewsletterTitle: "RECEIVE DEEP TECHNICAL ESSAYS IN YOUR INBOX",
-  footerNewsletterSubtitle: "Zero spam. Zero generic marketing. Only in-depth software architectural breakdowns, local AI research, and production post-mortems.",
-  footerBrandStatement: "An independent technology publication engineered by Krish. Fusing Neo-Brutalism, Gumroad minimalism, and Medium-grade editorial craft for software builders worldwide.",
-  
-  // Contact Page Defaults
-  contactTitle: "SECURE COMM CHANNEL",
-  contactSubtitle: "For architectural consulting, secure protocol design, or technical inquiries.",
-  contactEmail: "hello@krishficient.dev",
-  contactTwitter: "@krishficient",
-  contactGithub: "krishficient",
-  contactTelegram: "@krishficient"
-};
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<PageView>('home');
@@ -75,32 +40,36 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState<string>('All Posts');
   const [articles, setArticles] = useState<Article[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [dataSource, setDataSource] = useState<'sanity' | 'local'>('local');
 
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>(() => {
-    try {
-      const stored = localStorage.getItem(SITE_CONFIG_KEY);
-      return stored ? JSON.parse(stored) : DEFAULT_SITE_CONFIG;
-    } catch {
-      return DEFAULT_SITE_CONFIG;
-    }
-  });
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(DEFAULT_SITE_CONFIG);
+  const [bentoLinks, setBentoLinks] = useState<BentoLink[]>(DEFAULT_BENTO_LINKS);
 
-  const [bentoLinks, setBentoLinks] = useState<BentoLink[]>(() => {
-    try {
-      const stored = localStorage.getItem(BENTO_LINKS_KEY);
-      return stored ? JSON.parse(stored) : DEFAULT_BENTO_LINKS;
-    } catch {
-      return DEFAULT_BENTO_LINKS;
-    }
-  });
+  // Real-time Firestore Subscriptions for Cloud CMS Data
+  useEffect(() => {
+    const unsubConfig = subscribeSiteConfig((config) => {
+      setSiteConfig(config);
+    });
+    const unsubBento = subscribeBentoLinks((links) => {
+      setBentoLinks(links);
+    });
+    const unsubArticles = subscribeArticles((fetched) => {
+      setArticles(fetched);
+      setLoading(false);
+    });
 
-  const handleUpdateBentoLinks = (links: BentoLink[]) => {
+    return () => {
+      unsubConfig();
+      unsubBento();
+      unsubArticles();
+    };
+  }, []);
+
+  const handleUpdateBentoLinks = async (links: BentoLink[]) => {
     setBentoLinks(links);
     try {
-      localStorage.setItem(BENTO_LINKS_KEY, JSON.stringify(links));
+      await saveBentoLinks(links);
     } catch (e) {
-      console.warn('LocalStorage save failed for bento links:', e);
+      console.error("Failed to persist bento links to Firestore:", e);
     }
   };
 
@@ -174,25 +143,7 @@ export default function App() {
     return () => unsub();
   }, []);
 
-  // Load articles on mount
-  const loadContent = useCallback(async () => {
-    setLoading(true);
-    try {
-      const { articles: fetched, source } = await fetchArticles();
-      setArticles(fetched);
-      setDataSource(source);
-    } catch (err) {
-      console.error('Failed to load articles:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadContent();
-  }, [loadContent]);
-
-  // Apply dynamic theme colors
+  // Dynamic theme colors synced to global site configuration
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--color-primary', siteConfig.themePrimaryColor || '#FFD600');
@@ -341,17 +292,24 @@ export default function App() {
     navigateTo('article', newArticle.slug);
   };
 
-  const handleDeleteArticle = (slug: string) => {
-    deleteCustomLocalArticle(slug);
-    setArticles((prev) => prev.filter((a) => a.slug !== slug));
+  const handleDeleteArticle = async (slug: string) => {
+    try {
+      await deleteArticle(slug);
+      setArticles((prev) => prev.filter((a) => a.slug !== slug));
+      if (activeArticleSlug === slug) {
+        navigateTo('blog');
+      }
+    } catch (e) {
+      console.error("Failed to delete article from Firestore:", e);
+    }
   };
 
-  const handleUpdateSiteConfig = (newConfig: SiteConfig) => {
+  const handleUpdateSiteConfig = async (newConfig: SiteConfig) => {
     setSiteConfig(newConfig);
     try {
-      localStorage.setItem(SITE_CONFIG_KEY, JSON.stringify(newConfig));
+      await saveSiteConfig(newConfig);
     } catch (e) {
-      console.warn('Failed to save config:', e);
+      console.error("Failed to persist site config to Firestore:", e);
     }
   };
 

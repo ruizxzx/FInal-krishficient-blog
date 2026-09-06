@@ -193,7 +193,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, postsCount, siteConfig }
                     <span className="text-[var(--color-secondary)] font-bold">AI Systems:</span> Local SLMs, PyTorch, Gemini
                   </div>
                   <div className="bg-neutral-900 p-3 border border-neutral-800">
-                    <span className="text-[var(--color-secondary)] font-bold">Headless CMS:</span> Sanity Studio & Schemas
+                    <span className="text-[var(--color-secondary)] font-bold">Cloud Architecture:</span> Firestore Cloud CMS &amp; Edge Sync
                   </div>
                 </div>
               )}

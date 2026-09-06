@@ -50,13 +50,6 @@ export interface Article {
   clapsCount?: number;
 }
 
-export interface SanityConfig {
-  projectId: string;
-  dataset: string;
-  apiVersion: string;
-  useCdn: boolean;
-}
-
 export interface SiteConfig {
   logoImageUrl: string;
   logoPart1: string;
@@ -170,3 +163,15 @@ export interface UserSavedItem {
   title?: string;
   createdAt: string;
 }
+
+export interface ArticleComment {
+  id: string;
+  articleSlug: string;
+  authorId: string;
+  authorName: string;
+  authorAvatar?: string;
+  authorUsername?: string;
+  content: string;
+  createdAt: string;
+}
+

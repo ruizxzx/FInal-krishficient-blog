@@ -76,7 +76,7 @@ export const Footer: React.FC<FooterProps> = ({
             </p>
 
             <div className="pt-2 flex flex-wrap gap-2 font-mono text-xs font-bold text-neutral-400">
-              <span className="px-2 py-1 bg-neutral-900 border border-neutral-700">SANITY CMS READY</span>
+              <span className="px-2 py-1 bg-neutral-900 border border-neutral-700">FIRESTORE CLOUD CMS</span>
               <span className="px-2 py-1 bg-neutral-900 border border-neutral-700">HIGH DENSITY DESIGN</span>
               <span className="px-2 py-1 bg-neutral-900 border border-neutral-700">NO FLUFF</span>
             </div>
@@ -148,7 +148,7 @@ export const Footer: React.FC<FooterProps> = ({
                   onClick={() => onNavigate('cms')}
                   className="text-neutral-300 hover:text-[var(--color-secondary)] flex items-center space-x-1"
                 >
-                  <span>Sanity Studio Hub (Restricted)</span>
+                  <span>Admin Studio CMS (Restricted)</span>
                   <ArrowUpRight className="w-3 h-3" />
                 </button>
               </li>

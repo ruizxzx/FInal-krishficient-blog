@@ -1,6 +1,6 @@
 import { db, auth } from './firebase';
 import { 
-  collection, doc, setDoc, getDoc, updateDoc, getDocs, query, where, orderBy, deleteDoc, writeBatch, limit, serverTimestamp
+  collection, doc, setDoc, getDoc, updateDoc, getDocs, query, where, orderBy, deleteDoc, writeBatch, limit, serverTimestamp, onSnapshot
 } from 'firebase/firestore';
 import { CommunityUser, CommunityPost, CommunityComment, UserSavedItem, CarouselSlide } from '../types';
 
@@ -105,8 +105,11 @@ export async function createCommunityProfile(data: Omit<CommunityUser, 'createdA
 export async function updateCommunityProfile(uid: string, data: Partial<CommunityUser>) {
   const p = `users/${uid}`;
   try {
-    const now = new Date().toISOString();
-    await updateDoc(doc(db, 'users', uid), { ...data, updatedAt: now });
+    const updatePayload: any = { ...data, updatedAt: serverTimestamp() };
+    delete updatePayload.uid;
+    delete updatePayload.username;
+    delete updatePayload.createdAt;
+    await updateDoc(doc(db, 'users', uid), updatePayload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, p);
   }
@@ -225,6 +228,16 @@ export async function getCarouselSlides(): Promise<CarouselSlide[]> {
     console.error("Error fetching carousel slides:", error);
     return [];
   }
+}
+
+export function subscribeCarouselSlides(callback: (slides: CarouselSlide[]) => void): () => void {
+  const q = query(collection(db, 'carousel_slides'), orderBy('order', 'asc'));
+  return onSnapshot(q, (snap) => {
+    callback(snap.docs.map(d => ({ ...d.data(), id: d.id } as CarouselSlide)));
+  }, (err) => {
+    console.warn("Real-time carousel subscription failed:", err);
+    callback([]);
+  });
 }
 
 export async function addCarouselSlide(data: Omit<CarouselSlide, 'id' | 'createdAt' | 'updatedAt'>): Promise<CarouselSlide> {
