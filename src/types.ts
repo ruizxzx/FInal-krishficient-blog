@@ -107,4 +107,66 @@ export interface BentoLink {
   order: number;
 }
 
-export type PageView = 'home' | 'blog' | 'article' | 'about' | 'contact' | 'cms' | 'links';
+export type PageView = 'home' | 'blog' | 'article' | 'about' | 'contact' | 'cms' | 'links' | 'community' | 'community_post' | 'community_profile' | 'saved';
+
+export interface CommunityUser {
+  uid: string;
+  username: string;
+  displayName: string;
+  photoURL: string;
+  bio: string;
+  themeColor: string;
+  isBlocked?: boolean;
+  followersCount?: number;
+  followingCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommunityPost {
+  id: string; // Document ID
+  type: 'discussion' | 'blog';
+  title: string;
+  content: string;
+  authorId: string;
+  authorUsername: string;
+  authorName: string;
+  authorAvatar: string;
+  clapsCount?: number; // legacy
+  upvotesCount: number;
+  downvotesCount: number;
+  commentsCount: number;
+  isFeatured: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CommunityComment {
+  id: string; // Document ID
+  postId: string;
+  authorId: string;
+  authorUsername: string;
+  authorName: string;
+  authorAvatar: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CarouselSlide {
+  id: string;
+  title: string;
+  imageUrl: string;
+  linkUrl: string;
+  order: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UserSavedItem {
+  id: string;
+  itemId: string;
+  itemType: 'article' | 'post';
+  title?: string;
+  createdAt: string;
+}

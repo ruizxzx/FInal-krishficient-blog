@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Article, PageView, SiteConfig, BentoLink } from './types';
+import { Article, PageView, SiteConfig, BentoLink, CommunityUser } from './types';
 import { fetchArticles, getCustomLocalArticles, deleteCustomLocalArticle } from './lib/sanity';
 import { Header } from './components/Header';
 import { MarqueeTicker } from './components/MarqueeTicker';
@@ -13,9 +13,17 @@ import { Footer } from './components/Footer';
 import { SearchModal } from './components/SearchModal';
 import { AdminStudioModal } from './components/AdminStudioModal';
 import { RssModal } from './components/RssModal';
+import { CommunityView } from './components/CommunityView';
+import { CommunityPostView } from './components/CommunityPostView';
+import { CommunityProfileView } from './components/CommunityProfileView';
+import { SavedView } from './components/SavedView';
+import { UniqueHandleModal } from './components/UniqueHandleModal';
+import { auth } from './lib/firebase';
+import { getCommunityProfile, getUserSaves, toggleUserSaveInCloud } from './lib/community';
 import { Loader2 } from 'lucide-react';
 
 const SAVED_SLUGS_KEY = 'krishficient_saved_slugs_v1';
+const SAVED_COMMUNITY_KEY = 'krishficient_saved_community_v1';
 const SITE_CONFIG_KEY = 'krishficient_site_config_v1';
 const BENTO_LINKS_KEY = 'krishficient_bento_links_v1';
 
@@ -111,6 +119,61 @@ export default function App() {
     }
   });
 
+  const [savedCommunityPostIds, setSavedCommunityPostIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(SAVED_COMMUNITY_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [userAuth, setUserAuth] = useState(auth.currentUser);
+  const [userProfile, setUserProfile] = useState<CommunityUser | null>(null);
+  const [isHandleModalOpen, setIsHandleModalOpen] = useState(false);
+
+  // Sync auth state & cloud saved items
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged(async (user) => {
+      setUserAuth(user);
+      if (user) {
+        // Load profile
+        try {
+          const prof = await getCommunityProfile(user.uid);
+          setUserProfile(prof);
+        } catch (e) {
+          console.error("Error loading user profile:", e);
+        }
+
+        // Load cloud saves
+        try {
+          const cloudSaves = await getUserSaves(user.uid);
+          if (cloudSaves && cloudSaves.length > 0) {
+            const cloudArticleSlugs = cloudSaves.filter(s => s.itemType === 'article').map(s => s.itemId);
+            const cloudCommunityIds = cloudSaves.filter(s => s.itemType === 'post').map(s => s.itemId);
+
+            setSavedSlugs(prev => {
+              const merged = Array.from(new Set([...prev, ...cloudArticleSlugs]));
+              try { localStorage.setItem(SAVED_SLUGS_KEY, JSON.stringify(merged)); } catch {}
+              return merged;
+            });
+
+            setSavedCommunityPostIds(prev => {
+              const merged = Array.from(new Set([...prev, ...cloudCommunityIds]));
+              try { localStorage.setItem(SAVED_COMMUNITY_KEY, JSON.stringify(merged)); } catch {}
+              return merged;
+            });
+          }
+        } catch (e) {
+          console.error("Error loading cloud saves:", e);
+        }
+      } else {
+        setUserProfile(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   // Load articles on mount
   const loadContent = useCallback(async () => {
     setLoading(true);
@@ -166,6 +229,20 @@ export default function App() {
       } else if (hash === 'links') {
         setCurrentPage('links');
         setActiveArticleSlug(null);
+      } else if (hash === 'saved') {
+        setCurrentPage('saved');
+        setActiveArticleSlug(null);
+      } else if (hash === 'community') {
+        setCurrentPage('community');
+        setActiveArticleSlug(null);
+      } else if (hash.startsWith('community/post/')) {
+        const id = hash.replace('community/post/', '');
+        setActiveArticleSlug(id); // reusing activeArticleSlug state to hold param
+        setCurrentPage('community_post');
+      } else if (hash.startsWith('@')) {
+        const username = hash.replace('@', '');
+        setActiveArticleSlug(username);
+        setCurrentPage('community_profile');
       } else if (hash === 'cms' || hash === 'admin') {
         setCurrentPage('cms');
         setActiveArticleSlug(null);
@@ -177,11 +254,19 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
-  const navigateTo = (page: PageView, slug?: string) => {
-    if (page === 'article' && slug) {
-      setActiveArticleSlug(slug);
+  const navigateTo = (page: PageView, param?: string) => {
+    if (page === 'article' && param) {
+      setActiveArticleSlug(param);
       setCurrentPage('article');
-      window.location.hash = `article/${slug}`;
+      window.location.hash = `article/${param}`;
+    } else if (page === 'community_post' && param) {
+      setActiveArticleSlug(param);
+      setCurrentPage('community_post');
+      window.location.hash = `community/post/${param}`;
+    } else if (page === 'community_profile' && param) {
+      setActiveArticleSlug(param);
+      setCurrentPage('community_profile');
+      window.location.hash = `@${param}`;
     } else {
       setActiveArticleSlug(null);
       setCurrentPage(page);
@@ -190,11 +275,14 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleToggleSave = (slug: string) => {
+  const handleToggleSave = async (slug: string) => {
+    const targetArticle = articles.find(a => a.slug === slug);
+    const willBeSaved = !savedSlugs.includes(slug);
+
     setSavedSlugs((prev) => {
-      const next = prev.includes(slug)
-        ? prev.filter((s) => s !== slug)
-        : [...prev, slug];
+      const next = willBeSaved
+        ? [...prev, slug]
+        : prev.filter((s) => s !== slug);
       try {
         localStorage.setItem(SAVED_SLUGS_KEY, JSON.stringify(next));
       } catch (e) {
@@ -202,6 +290,50 @@ export default function App() {
       }
       return next;
     });
+
+    if (userAuth) {
+      try {
+        await toggleUserSaveInCloud(
+          userAuth.uid,
+          slug,
+          'article',
+          !willBeSaved,
+          targetArticle?.title || slug
+        );
+      } catch (e) {
+        console.error("Error saving dispatch to cloud:", e);
+      }
+    }
+  };
+
+  const handleToggleSaveCommunity = async (postId: string, title?: string) => {
+    const willBeSaved = !savedCommunityPostIds.includes(postId);
+
+    setSavedCommunityPostIds((prev) => {
+      const next = willBeSaved
+        ? [...prev, postId]
+        : prev.filter((id) => id !== postId);
+      try {
+        localStorage.setItem(SAVED_COMMUNITY_KEY, JSON.stringify(next));
+      } catch (e) {
+        console.warn('LocalStorage save failed for community post:', e);
+      }
+      return next;
+    });
+
+    if (userAuth) {
+      try {
+        await toggleUserSaveInCloud(
+          userAuth.uid,
+          postId,
+          'post',
+          !willBeSaved,
+          title || 'Community Post'
+        );
+      } catch (e) {
+        console.error("Error saving community post to cloud:", e);
+      }
+    }
   };
 
   const handleArticlePublished = (newArticle: Article) => {
@@ -226,16 +358,21 @@ export default function App() {
   const activeArticle = articles.find((a) => a.slug === activeArticleSlug);
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-black font-sans selection:bg-[var(--color-primary)] selection:text-black">
+    <div className="min-h-screen flex flex-col bg-white text-black font-sans selection:bg-[var(--color-primary)] selection:text-black pb-28">
       {/* Top Header */}
       <Header
         currentPage={currentPage}
         onNavigate={navigateTo}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenCms={() => setIsCmsOpen(true)}
-        savedCount={savedSlugs.length}
+        savedCount={savedSlugs.length + savedCommunityPostIds.length}
         siteConfig={siteConfig}
+        userProfile={userProfile}
+        onOpenHandleModal={() => setIsHandleModalOpen(true)}
       />
+
+      {/* Spacer for Top Fixed Logo */}
+      <div className="pt-20 sm:pt-24" />
 
       {/* Marquee Ticker */}
       <MarqueeTicker />
@@ -316,6 +453,47 @@ export default function App() {
               <AboutView onNavigate={navigateTo} siteConfig={siteConfig} />
             )}
 
+            {currentPage === 'saved' && (
+              <SavedView 
+                savedSlugs={savedSlugs} 
+                savedCommunityPostIds={savedCommunityPostIds}
+                articles={articles} 
+                onNavigate={navigateTo} 
+                onToggleSaveArticle={handleToggleSave} 
+                onToggleSaveCommunityPost={handleToggleSaveCommunity}
+                userAuth={userAuth}
+                userProfile={userProfile}
+              />
+            )}
+
+            {currentPage === 'community' && (
+              <CommunityView 
+                onNavigate={navigateTo}
+                userProfile={userProfile}
+                onOpenHandleModal={() => setIsHandleModalOpen(true)}
+                savedCommunityPostIds={savedCommunityPostIds}
+                onToggleSaveCommunityPost={handleToggleSaveCommunity}
+                onProfileUpdated={(p) => setUserProfile(p)}
+              />
+            )}
+            
+            {currentPage === 'community_post' && activeArticleSlug && (
+              <CommunityPostView 
+                postId={activeArticleSlug} 
+                onNavigate={navigateTo} 
+                isSaved={savedCommunityPostIds.includes(activeArticleSlug)}
+                onToggleSave={(id, title) => handleToggleSaveCommunity(id, title)}
+              />
+            )}
+            
+            {currentPage === 'community_profile' && activeArticleSlug && (
+              <CommunityProfileView 
+                username={activeArticleSlug} 
+                onNavigate={navigateTo} 
+                currentUserProfile={userProfile} 
+              />
+            )}
+
             {currentPage === 'links' && (
               <LinksView links={bentoLinks} siteConfig={siteConfig} />
             )}
@@ -356,6 +534,16 @@ export default function App() {
         isOpen={isRssOpen}
         onClose={() => setIsRssOpen(false)}
         articles={articles}
+      />
+
+      <UniqueHandleModal
+        isOpen={isHandleModalOpen}
+        onClose={() => setIsHandleModalOpen(false)}
+        currentUser={userAuth}
+        onProfileCreated={(profile) => {
+          setUserProfile(profile);
+          setIsHandleModalOpen(false);
+        }}
       />
 
       {/* Footer */}

@@ -21,6 +21,9 @@ import {
 } from 'lucide-react';
 import { ArticleCard } from './ArticleCard';
 import { CommentsSection } from './CommentsSection';
+import { auth, loginWithGoogle } from '../lib/firebase';
+import { getArticleLikeStatus, toggleArticleLike } from '../lib/community';
+import { useAuthState } from 'react-firebase-hooks/auth';
 
 interface ArticleViewProps {
   article: Article;
@@ -47,6 +50,18 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
   const [hasClapped, setHasClapped] = useState(false);
   const [fontSize, setFontSize] = useState<'normal' | 'large'>('normal');
   const [scrollProgress, setScrollProgress] = useState(0);
+  const [user] = useAuthState(auth);
+
+  // Check if current user has liked this article in Firestore
+  useEffect(() => {
+    if (user) {
+      getArticleLikeStatus(article.slug, user.uid).then(liked => {
+        setHasClapped(liked);
+      });
+    } else {
+      setHasClapped(false);
+    }
+  }, [article.slug, user]);
 
   // Track reading progress
   useEffect(() => {
@@ -73,9 +88,26 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
     setTimeout(() => setCopiedLink(false), 2500);
   };
 
-  const handleClap = () => {
-    setClaps((prev) => prev + 1);
-    setHasClapped(true);
+  const handleClap = async () => {
+    let currentUser = user;
+    if (!currentUser) {
+      try {
+        const credUser = await loginWithGoogle();
+        currentUser = credUser;
+      } catch (err) {
+        console.error("User sign in cancelled or failed:", err);
+        return;
+      }
+    }
+    if (!currentUser) return;
+
+    try {
+      const newLiked = await toggleArticleLike(article.slug, currentUser.uid, hasClapped);
+      setHasClapped(newLiked);
+      setClaps(prev => (newLiked ? prev + 1 : Math.max(0, prev - 1)));
+    } catch (err) {
+      console.error("Error liking article:", err);
+    }
   };
 
   // Related articles (same category or latest excluding current)

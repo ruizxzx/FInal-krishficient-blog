@@ -29,30 +29,7 @@ export const Footer: React.FC<FooterProps> = ({
   onOpenRssModal,
   siteConfig
 }) => {
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  const handleAdminAccess = async () => {
-    try {
-      setIsLoggingIn(true);
-      let currentUser = auth.currentUser;
-      
-      if (!currentUser) {
-        currentUser = await loginWithGoogle();
-      }
-
-      if (currentUser && currentUser.email && ALLOWED_ADMIN_EMAILS.includes(currentUser.email)) {
-        onOpenCms();
-      } else {
-        alert("Access Denied: You are not an authorized administrator.");
-        await logout(); // Sign them out so they can try again with a different account if needed
-      }
-    } catch (error) {
-      console.error("Login failed", error);
-      alert("Failed to authenticate.");
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
   return (
     <footer className="w-full bg-[#0A0A0A] text-white border-t-4 border-black selection:bg-[var(--color-primary)] selection:text-black">
       {/* Top Newsletter / Dispatch signup section */}
@@ -168,11 +145,10 @@ export const Footer: React.FC<FooterProps> = ({
             <ul className="space-y-2 text-xs font-mono">
               <li>
                 <button
-                  onClick={handleAdminAccess}
-                  disabled={isLoggingIn}
-                  className="text-neutral-300 hover:text-[var(--color-secondary)] flex items-center space-x-1 disabled:opacity-50"
+                  onClick={() => onNavigate('cms')}
+                  className="text-neutral-300 hover:text-[var(--color-secondary)] flex items-center space-x-1"
                 >
-                  <span>{isLoggingIn ? 'Authenticating...' : 'Sanity Studio Hub (Restricted)'}</span>
+                  <span>Sanity Studio Hub (Restricted)</span>
                   <ArrowUpRight className="w-3 h-3" />
                 </button>
               </li>

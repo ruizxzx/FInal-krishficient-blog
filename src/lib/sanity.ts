@@ -128,7 +128,10 @@ export async function fetchArticles(configOverride?: { projectId: string; datase
 
   // Combine initial curated articles + locally created articles
   const customLocal = getCustomLocalArticles();
-  const localCombined = [...customLocal, ...INITIAL_ARTICLES];
+  const localCombined = [
+    ...customLocal,
+    ...INITIAL_ARTICLES.filter(a => !customLocal.some(c => c.id === a.id || c.slug === a.slug))
+  ];
 
   if (!projectId) {
     return {

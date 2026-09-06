@@ -1,8 +1,9 @@
-import React from 'react';
-import { Article, PageView, Category, SiteConfig } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Article, PageView, Category, SiteConfig, CommunityPost } from '../types';
 import { Hero } from './Hero';
 import { ArticleCard } from './ArticleCard';
 import { NewsletterSignup } from './NewsletterSignup';
+import { getPosts, getCarouselSlides } from '../lib/community';
 import { 
   Sparkles, 
   ArrowRight, 
@@ -14,9 +15,14 @@ import {
   Layers, 
   ArrowUpRight,
   Code2,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp,
+  MessageSquare,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { CATEGORIES } from '../data/articles';
+import { CarouselSlide } from '../types';
 
 interface HomeViewProps {
   articles: Article[];
@@ -28,6 +34,83 @@ interface HomeViewProps {
   siteConfig: SiteConfig;
 }
 
+const CarouselComponent: React.FC<{ slides: CarouselSlide[] }> = ({ slides }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (slides.length <= 1) return;
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 100) {
+          setCurrentIndex((current) => (current + 1) % slides.length);
+          return 0;
+        }
+        return prev + (100 / (5000 / 100)); // 5 seconds per slide, update every 100ms
+      });
+    }, 100);
+    return () => clearInterval(interval);
+  }, [slides.length, currentIndex]);
+
+  if (!slides || slides.length === 0) return null;
+
+  const currentSlide = slides[currentIndex];
+
+  const handleManualNav = (index: number) => {
+    setCurrentIndex(index);
+    setProgress(0);
+  };
+
+  return (
+    <div className="w-full bg-black border-b-4 border-black p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto">
+        <div className="relative w-full aspect-[21/9] sm:aspect-[3/1] neo-border bg-white overflow-hidden group">
+          <a href={currentSlide.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full relative cursor-pointer">
+            <img 
+              src={currentSlide.imageUrl} 
+              alt={currentSlide.title} 
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6 sm:p-10">
+              <h2 className="text-white font-display font-black text-2xl sm:text-4xl uppercase max-w-2xl">{currentSlide.title}</h2>
+            </div>
+          </a>
+          
+          {slides.length > 1 && (
+            <>
+              {/* Progress Bar Timeline */}
+              <div className="absolute bottom-0 left-0 h-1.5 sm:h-2 bg-neutral-800/50 w-full">
+                <div 
+                  className="h-full bg-[var(--color-primary)] transition-all duration-100 ease-linear" 
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+
+              {/* Controls */}
+              <div className="absolute top-1/2 -translate-y-1/2 left-4">
+                <button 
+                  onClick={() => handleManualNav((currentIndex - 1 + slides.length) % slides.length)}
+                  className="w-8 h-8 sm:w-10 sm:h-10 bg-white/10 hover:bg-white text-white hover:text-black neo-border backdrop-blur-sm flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
+              <div className="absolute top-1/2 -translate-y-1/2 right-4">
+                <button 
+                  onClick={() => handleManualNav((currentIndex + 1) % slides.length)}
+                  className="w-8 h-8 sm:w-10 sm:h-10 bg-white/10 hover:bg-white text-white hover:text-black neo-border backdrop-blur-sm flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"
+                >
+                  <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export const HomeView: React.FC<HomeViewProps> = ({
   articles,
   onNavigate,
@@ -37,6 +120,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onSelectCategory,
   siteConfig,
 }) => {
+  const [featuredCommunityPosts, setFeaturedCommunityPosts] = useState<CommunityPost[]>([]);
+  const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
+
+  useEffect(() => {
+    const fetchCommunityPosts = async () => {
+      // Get discussions and blogs
+      const d = await getPosts('discussion');
+      const b = await getPosts('blog');
+      const all = [...d, ...b];
+      const featured = all.filter(p => p.isFeatured).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setFeaturedCommunityPosts(featured.slice(0, 3));
+    };
+    const fetchSlides = async () => {
+      const slides = await getCarouselSlides();
+      setCarouselSlides(slides);
+    };
+    fetchCommunityPosts();
+    fetchSlides();
+  }, []);
+
   const featuredArticle = articles.find((a) => a.featured) || articles[0];
   const latestArticles = articles.filter((a) => a.id !== featuredArticle?.id).slice(0, 5);
 
@@ -83,6 +186,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
     <div className="w-full bg-white pb-20">
       {/* 1. Hero Section */}
       <Hero onNavigate={onNavigate} postsCount={articles.length} siteConfig={siteConfig} />
+
+      {/* 1.5 Carousel Section */}
+      {carouselSlides.length > 0 && <CarouselComponent slides={carouselSlides} />}
 
       {/* 2. High Density Main Split: 2/3 Featured Column & 1/3 Dispatch Updates / Newsletter */}
       {featuredArticle && (
@@ -265,6 +371,56 @@ export const HomeView: React.FC<HomeViewProps> = ({
           ))}
         </div>
       </section>
+
+      {/* Featured Community Posts */}
+      {featuredCommunityPosts.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-18 border-b-4 border-black">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <TrendingUp className="w-6 h-6 text-[var(--color-primary)] stroke-[2.5]" />
+                <h2 className="font-display font-black text-2xl sm:text-3xl uppercase tracking-tighter">
+                  Community Highlights
+                </h2>
+              </div>
+              <p className="font-mono text-xs sm:text-sm text-neutral-600 font-bold uppercase">
+                Featured discussions and blogs from the community
+              </p>
+            </div>
+            <button 
+              onClick={() => onNavigate('community')}
+              className="flex-shrink-0 flex items-center space-x-1.5 px-4 py-2 border-2 border-black font-display font-black text-xs uppercase hover:bg-black hover:text-white transition-colors"
+            >
+              <span>View Community</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {featuredCommunityPosts.map(post => (
+              <div 
+                key={post.id}
+                onClick={() => onNavigate('community_post', post.id)}
+                className="bg-white border-4 border-black p-5 cursor-pointer neo-shadow-sm hover:-translate-y-1 hover:neo-shadow transition-all group flex flex-col h-full"
+              >
+                <div className="inline-block self-start px-2 py-0.5 bg-[var(--color-secondary)] border-2 border-black font-mono text-[10px] font-black uppercase mb-3">
+                  {post.type}
+                </div>
+                <h3 className="font-display font-black text-xl group-hover:text-[var(--color-primary)] transition-colors line-clamp-3 mb-4">
+                  {post.title}
+                </h3>
+                <div className="mt-auto pt-4 border-t-2 border-black flex justify-between items-center font-mono text-xs font-bold uppercase">
+                  <span className="truncate max-w-[120px]">@{post.authorUsername}</span>
+                  <div className="flex items-center space-x-2">
+                    <span className="flex items-center space-x-1"><Sparkles className="w-3 h-3"/> <span>{post.clapsCount}</span></span>
+                    <span className="flex items-center space-x-1"><MessageSquare className="w-3 h-3"/> <span>{post.commentsCount}</span></span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 4. Topics / Category Explorer */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-14 sm:py-18 border-b-4 border-black">

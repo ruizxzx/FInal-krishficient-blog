@@ -13,10 +13,15 @@ import {
   ArrowUp,
   ArrowDown,
   Edit2,
-  Shield
+  Shield,
+  Layout,
+  RefreshCw,
+  Star
 } from 'lucide-react';
 import { SANITY_CONFIG, saveCustomLocalArticle } from '../lib/sanity';
 import { loginWithGoogle, auth, logout } from '../lib/firebase';
+import { getCarouselSlides, addCarouselSlide, updateCarouselSlide, deleteCarouselSlide } from '../lib/community';
+import { CarouselSlide } from '../types';
 
 const ALLOWED_ADMIN_EMAILS = ['ruizxzxz@gmail.com', 'krishsarkar456@gmail.com'];
 
@@ -74,7 +79,83 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<'create' | 'manage' | 'settings' | 'links' | 'sanity'>('settings');
+  const [activeTab, setActiveTab] = useState<'create' | 'manage' | 'settings' | 'links' | 'sanity' | 'carousel'>('settings');
+
+  // Carousel State
+  const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
+  const [isLoadingCarousel, setIsLoadingCarousel] = useState(false);
+  const [newSlideTitle, setNewSlideTitle] = useState('');
+  const [newSlideImageUrl, setNewSlideImageUrl] = useState('');
+  const [newSlideLinkUrl, setNewSlideLinkUrl] = useState('');
+
+  useEffect(() => {
+    if (isOpen && isAuthenticated) {
+      loadCarousel();
+    }
+  }, [isOpen, isAuthenticated]);
+
+  const loadCarousel = async () => {
+    setIsLoadingCarousel(true);
+    try {
+      const slides = await getCarouselSlides();
+      setCarouselSlides(slides);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingCarousel(false);
+    }
+  };
+
+  const handleAddSlide = async () => {
+    if (!newSlideImageUrl.trim()) return;
+    try {
+      const added = await addCarouselSlide({
+        title: newSlideTitle.trim(),
+        imageUrl: newSlideImageUrl.trim(),
+        linkUrl: newSlideLinkUrl.trim(),
+        order: carouselSlides.length
+      });
+      setCarouselSlides([...carouselSlides, added]);
+      setNewSlideTitle('');
+      setNewSlideImageUrl('');
+      setNewSlideLinkUrl('');
+    } catch (e) {
+      console.error(e);
+      alert('Failed to add slide');
+    }
+  };
+
+  const handleDeleteSlide = async (id: string) => {
+    if (!confirm('Delete this slide?')) return;
+    try {
+      await deleteCarouselSlide(id);
+      setCarouselSlides(carouselSlides.filter(s => s.id !== id));
+    } catch (e) {
+      console.error(e);
+      alert('Failed to delete slide');
+    }
+  };
+
+  const handleMoveSlide = async (index: number, direction: -1 | 1) => {
+    if (index + direction < 0 || index + direction >= carouselSlides.length) return;
+    
+    const newSlides = [...carouselSlides];
+    const temp = newSlides[index];
+    newSlides[index] = newSlides[index + direction];
+    newSlides[index + direction] = temp;
+    
+    // Update orders locally
+    newSlides.forEach((s, i) => s.order = i);
+    setCarouselSlides(newSlides);
+    
+    // Update orders in DB
+    try {
+      await updateCarouselSlide(newSlides[index].id, { order: newSlides[index].order });
+      await updateCarouselSlide(newSlides[index + direction].id, { order: newSlides[index + direction].order });
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // Site Config Form state
   const [logoImageUrl, setLogoImageUrl] = useState(siteConfig.logoImageUrl || '');
@@ -397,10 +478,10 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
           <div className="bg-white min-h-[600px] flex flex-col">
 
         {/* Tab Selector */}
-        <div className="grid grid-cols-5 border-b-4 border-black font-display font-black text-[10px] sm:text-xs uppercase bg-white">
+        <div className="grid grid-cols-6 border-b-4 border-black font-display font-black text-[10px] sm:text-xs uppercase bg-white overflow-x-auto whitespace-nowrap">
           <button
             onClick={() => setActiveTab('settings')}
-            className={`py-3 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
               activeTab === 'settings' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
             }`}
           >
@@ -410,7 +491,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
           
           <button
             onClick={() => setActiveTab('create')}
-            className={`py-3 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
               activeTab === 'create' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
             }`}
           >
@@ -420,7 +501,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
           <button
             onClick={() => setActiveTab('manage')}
-            className={`py-3 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
               activeTab === 'manage' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
             }`}
           >
@@ -430,17 +511,27 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
           <button
             onClick={() => setActiveTab('links')}
-            className={`py-3 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
               activeTab === 'links' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
             }`}
           >
             <LinkIcon className="w-4 h-4" />
             <span className="hidden sm:inline">LINKS</span>
           </button>
+          
+          <button
+            onClick={() => setActiveTab('carousel')}
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+              activeTab === 'carousel' ? 'bg-[var(--color-primary)] text-black border-r-2 border-black' : 'hover:bg-neutral-100 border-r-2 border-black'
+            }`}
+          >
+            <Layout className="w-4 h-4" />
+            <span className="hidden sm:inline">CAROUSEL</span>
+          </button>
 
           <button
             onClick={() => setActiveTab('sanity')}
-            className={`py-3 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
+            className={`py-3 px-2 flex flex-col items-center justify-center space-y-1 sm:flex-row sm:space-y-0 sm:space-x-1.5 transition-colors ${
               activeTab === 'sanity' ? 'bg-[var(--color-primary)] text-black' : 'hover:bg-neutral-100'
             }`}
           >
@@ -448,6 +539,85 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
             <span className="hidden sm:inline">SANITY</span>
           </button>
         </div>
+
+        {/* Tab: Carousel Management */}
+        {activeTab === 'carousel' && (
+          <div className="p-6 max-h-[70vh] overflow-y-auto space-y-8 bg-neutral-50">
+            <div>
+              <h2 className="font-display font-black text-2xl uppercase tracking-tight mb-2">Featured Carousel Slides</h2>
+              <p className="font-sans text-sm text-neutral-600 mb-6">Manage the auto-sliding promotional banners shown on the home page.</p>
+
+              <div className="bg-white border-2 border-black p-4 shadow-[4px_4px_0_0_#000] mb-8">
+                <h3 className="font-mono text-sm font-bold uppercase mb-4">Add New Slide</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Title</label>
+                    <input 
+                      type="text" 
+                      value={newSlideTitle}
+                      onChange={(e) => setNewSlideTitle(e.target.value)}
+                      placeholder="e.g. Subscribe to my new course!"
+                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-mono text-xs font-bold uppercase block mb-1">Image URL (Thumbnail)</label>
+                    <input 
+                      type="url" 
+                      value={newSlideImageUrl}
+                      onChange={(e) => setNewSlideImageUrl(e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
+                    <input 
+                      type="url" 
+                      value={newSlideLinkUrl}
+                      onChange={(e) => setNewSlideLinkUrl(e.target.value)}
+                      placeholder="https://example.com/promo"
+                      className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={handleAddSlide}
+                    className="px-6 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+                  >
+                    Add Slide
+                  </button>
+                </div>
+              </div>
+
+              {isLoadingCarousel ? (
+                <div className="py-12 flex justify-center"><RefreshCw className="w-8 h-8 animate-spin" /></div>
+              ) : carouselSlides.length === 0 ? (
+                <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500">
+                  No carousel slides found. Add one above.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {carouselSlides.map((slide, index) => (
+                    <div key={slide.id} className="flex items-center gap-4 bg-white border-2 border-black p-3">
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => handleMoveSlide(index, -1)} disabled={index === 0} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
+                        <button onClick={() => handleMoveSlide(index, 1)} disabled={index === carouselSlides.length - 1} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
+                      </div>
+                      <img src={slide.imageUrl} alt={slide.title} className="w-24 h-16 object-cover border-2 border-black bg-neutral-100" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-display font-bold text-sm truncate">{slide.title || 'Untitled Slide'}</div>
+                        <div className="font-mono text-xs text-neutral-500 truncate">{slide.linkUrl}</div>
+                      </div>
+                      <button onClick={() => handleDeleteSlide(slide.id)} className="p-2 text-red-600 hover:bg-red-50">
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tab 1: Quick Article Creator */}
         {activeTab === 'create' && (
