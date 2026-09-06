@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { CommunityUser, CommunityPost, PageView } from '../types';
-import { getProfileByUsername, getPosts, updateCommunityProfile, checkIsFollowing, followUser, unfollowUser, getCommunityProfile } from '../lib/community';
-import { auth } from '../lib/firebase';
-import { ArrowLeft, User, Sparkles, MapPin, Link as LinkIcon, Settings, UserPlus, UserMinus, Loader2 } from 'lucide-react';
+import { getProfileByUsername, getPosts, updateCommunityProfile, checkIsFollowing, followUser, unfollowUser, getCommunityProfile, deletePost } from '../lib/community';
+import { auth, checkIsAdmin } from '../lib/firebase';
+import { ArrowLeft, User, Sparkles, MapPin, Link as LinkIcon, Settings, UserPlus, UserMinus, Loader2, Trash } from 'lucide-react';
 
 interface CommunityProfileViewProps {
   username: string;
@@ -23,6 +23,25 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
   const [isFollowLoading, setIsFollowLoading] = useState(false);
   
   const isOwner = auth.currentUser && profile && auth.currentUser.uid === profile.uid;
+  const isAdmin = checkIsAdmin(auth.currentUser?.email);
+
+  const handleDeletePost = async (postId: string, authorId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentUser = auth.currentUser;
+    const currentIsAdmin = checkIsAdmin(currentUser?.email);
+    if (!currentUser || (!currentIsAdmin && currentUser.uid !== authorId)) {
+      alert('You do not have permission to delete this post.');
+      return;
+    }
+    if (!confirm('Are you sure you want to permanently delete this post?')) return;
+    try {
+      await deletePost(postId);
+      setPosts(posts.filter(p => p.id !== postId));
+    } catch (err: any) {
+      console.error(err);
+      alert('Failed to delete post: ' + (err?.message || 'Permission denied'));
+    }
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -241,8 +260,19 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
               onClick={() => onNavigate('community_post', post.id)}
               className="bg-white border-4 border-black p-5 cursor-pointer neo-shadow-sm hover:-translate-y-1 hover:neo-shadow transition-all group"
             >
-              <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase mb-3">
-                {post.type}
+              <div className="flex items-center justify-between mb-3">
+                <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase">
+                  {post.type}
+                </div>
+                {auth.currentUser && (auth.currentUser.uid === post.authorId || checkIsAdmin(auth.currentUser?.email)) && (
+                  <button
+                    onClick={(e) => handleDeletePost(post.id, post.authorId, e)}
+                    className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-black transition-colors"
+                    title="Delete post"
+                  >
+                    <Trash className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
               <h3 className="font-display font-black text-xl group-hover:text-[var(--color-primary)] transition-colors">
                 {post.title}

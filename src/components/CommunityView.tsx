@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CommunityUser, CommunityPost, PageView } from '../types';
-import { getCommunityProfile, getPosts } from '../lib/community';
-import { auth, loginWithGoogle } from '../lib/firebase';
+import { getCommunityProfile, getPosts, deletePost } from '../lib/community';
+import { auth, loginWithGoogle, checkIsAdmin } from '../lib/firebase';
 import { 
   MessageSquare, 
   BookOpen, 
@@ -15,7 +15,8 @@ import {
   LogIn, 
   Bookmark, 
   AtSign,
-  Plus
+  Plus,
+  Trash
 } from 'lucide-react';
 import { CommunityEditor } from './CommunityEditor';
 import { formatDisplayDate } from '../lib/dateUtils';
@@ -133,6 +134,26 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     onProfileUpdated?.(newProfile);
     setIsHandleModalOpen(false);
     setIsEditorOpen(true);
+  };
+
+  const activeUser = auth.currentUser || userAuth;
+  const isAdmin = checkIsAdmin(activeUser?.email);
+  const handleDeletePost = async (postId: string, authorId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentUser = auth.currentUser || userAuth;
+    const currentIsAdmin = checkIsAdmin(currentUser?.email);
+    if (!currentUser || (!currentIsAdmin && currentUser.uid !== authorId)) {
+      alert('You do not have permission to delete this post.');
+      return;
+    }
+    if (!confirm('Are you sure you want to permanently delete this post?')) return;
+    try {
+      await deletePost(postId);
+      setPosts(posts.filter(p => p.id !== postId));
+    } catch (err: any) {
+      console.error(err);
+      alert('Failed to delete post: ' + (err?.message || 'Permission denied'));
+    }
   };
 
   return (
@@ -329,21 +350,32 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                       )}
                     </div>
 
-                    {/* Quick Save Bookmark */}
-                    {onToggleSaveCommunityPost && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onToggleSaveCommunityPost(post.id, post.title);
-                        }}
-                        className={`p-1.5 border-2 border-black transition-colors ${
-                          isPostSaved ? 'bg-[var(--color-primary)] text-black' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600'
-                        }`}
-                        title={isPostSaved ? 'Remove from saved' : 'Save post'}
-                      >
-                        <Bookmark className={`w-3.5 h-3.5 ${isPostSaved ? 'fill-black stroke-black' : ''}`} />
-                      </button>
-                    )}
+                    {/* Actions: Delete & Bookmark */}
+                    <div className="flex items-center space-x-2">
+                      {((auth.currentUser || userAuth)?.uid === post.authorId || checkIsAdmin((auth.currentUser || userAuth)?.email)) && (
+                        <button
+                          onClick={(e) => handleDeletePost(post.id, post.authorId, e)}
+                          className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-black transition-colors"
+                          title="Delete post"
+                        >
+                          <Trash className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {onToggleSaveCommunityPost && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleSaveCommunityPost(post.id, post.title);
+                          }}
+                          className={`p-1.5 border-2 border-black transition-colors ${
+                            isPostSaved ? 'bg-[var(--color-primary)] text-black' : 'bg-neutral-100 hover:bg-neutral-200 text-neutral-600'
+                          }`}
+                          title={isPostSaved ? 'Remove from saved' : 'Save post'}
+                        >
+                          <Bookmark className={`w-3.5 h-3.5 ${isPostSaved ? 'fill-black stroke-black' : ''}`} />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="font-display font-black text-xl sm:text-2xl group-hover:text-[var(--color-primary)] transition-colors line-clamp-2">

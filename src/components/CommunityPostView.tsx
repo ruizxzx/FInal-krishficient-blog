@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { CommunityPost, CommunityComment, PageView, CommunityUser } from '../types';
 import { getPost, getComments, addComment, toggleVote, getUserVote, deletePost, deleteComment, getCommunityProfile, updatePost } from '../lib/community';
-import { auth, loginWithGoogle } from '../lib/firebase';
+import { auth, loginWithGoogle, checkIsAdmin } from '../lib/firebase';
 import { ArrowLeft, MessageSquare, Sparkles, Loader2, User, Star, ArrowUp, ArrowDown, Bookmark, Trash } from 'lucide-react';
 import { formatDisplayDate } from '../lib/dateUtils';
 
@@ -11,8 +11,6 @@ interface CommunityPostViewProps {
   isSaved?: boolean;
   onToggleSave?: (postId: string, title?: string) => void;
 }
-
-const ALLOWED_ADMIN_EMAILS = ['ruizxzxz@gmail.com', 'krishsarkar456@gmail.com'];
 
 export const CommunityPostView: React.FC<CommunityPostViewProps> = ({ 
   postId, 
@@ -101,26 +99,35 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
     }
   };
 
+  const activeUser = auth.currentUser || userAuth;
+  const isAdmin = checkIsAdmin(activeUser?.email);
+  const canDeletePost = activeUser && (activeUser.uid === post?.authorId || isAdmin);
+
   const handleDeletePost = async () => {
-    if (!confirm('Are you sure you want to delete this post?')) return;
+    if (!confirm('Are you sure you want to permanently delete this post from Firestore?')) return;
     try {
       await deletePost(postId);
       onNavigate('community');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert('Failed to delete post');
+      alert('Failed to delete post: ' + (e?.message || 'Permission denied'));
     }
   };
 
-  const handleDeleteComment = async (commentId: string) => {
-    if (!confirm('Are you sure you want to delete this comment?')) return;
+  const handleDeleteComment = async (commentId: string, commentAuthorId: string) => {
+    const canDeleteComment = userAuth && (userAuth.uid === commentAuthorId || isAdmin);
+    if (!canDeleteComment) {
+      alert('You do not have permission to delete this comment.');
+      return;
+    }
+    if (!confirm('Are you sure you want to permanently delete this comment?')) return;
     try {
       await deleteComment(postId, commentId);
       setComments(comments.filter(c => c.id !== commentId));
       if (post) setPost({ ...post, commentsCount: Math.max(0, post.commentsCount - 1) });
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert('Failed to delete comment');
+      alert('Failed to delete comment: ' + (e?.message || 'Permission denied'));
     }
   };
 
@@ -155,8 +162,6 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
       alert('Failed to feature post');
     }
   };
-
-  const isAdmin = userAuth && userAuth.email && ALLOWED_ADMIN_EMAILS.includes(userAuth.email);
 
   if (loading) {
     return (
@@ -256,7 +261,7 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
             <Bookmark className={`w-4 h-4 ${effectiveIsSaved ? 'fill-black' : ''}`} />
             <span>{effectiveIsSaved ? 'Saved' : 'Save'}</span>
           </button>
-          {isAdmin && (
+          {canDeletePost && (
             <button 
               onClick={handleDeletePost}
               className="ml-auto flex items-center space-x-1 font-mono text-sm font-bold uppercase px-4 py-2 border-2 border-red-500 text-red-500 hover:bg-red-50 transition-colors"
@@ -321,8 +326,8 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
                   </button>
                   <span className="text-neutral-500 ml-2">{formatDisplayDate(c.createdAt)}</span>
                 </div>
-                {isAdmin && (
-                  <button onClick={() => handleDeleteComment(c.id)} className="ml-auto text-red-500 hover:text-red-700">
+                {(isAdmin || (userAuth && userAuth.uid === c.authorId)) && (
+                  <button onClick={() => handleDeleteComment(c.id, c.authorId)} className="ml-auto text-red-500 hover:text-red-700" title="Delete comment">
                     <Trash className="w-4 h-4" />
                   </button>
                 )}

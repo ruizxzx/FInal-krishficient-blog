@@ -174,15 +174,27 @@ export async function saveBentoLinks(links: BentoLink[]): Promise<void> {
 // 3. ARTICLES / EDITORIAL CMS CONTENT
 // ==========================================
 
-function mergeArticlesWithInitial(cloudArticles: Article[]): Article[] {
+async function getDeletedSlugs(): Promise<Set<string>> {
+  const deletedSet = new Set<string>();
+  try {
+    const snap = await getDocs(collection(db, 'deleted_articles'));
+    snap.docs.forEach(d => deletedSet.add(d.id));
+  } catch (e) {
+    // ignore if rules or network issues
+  }
+  return deletedSet;
+}
+
+function mergeArticlesWithInitial(cloudArticles: Article[], deletedSlugs: Set<string>): Article[] {
   const cloudSlugs = new Set(cloudArticles.map(a => a.slug));
-  const fallbackOnly = INITIAL_ARTICLES.filter(a => !cloudSlugs.has(a.slug));
+  const fallbackOnly = INITIAL_ARTICLES.filter(a => !cloudSlugs.has(a.slug) && !deletedSlugs.has(a.slug));
   return [...cloudArticles, ...fallbackOnly];
 }
 
 export function subscribeArticles(callback: (articles: Article[]) => void): () => void {
   const articlesRef = collection(db, 'articles');
-  return onSnapshot(articlesRef, (snap) => {
+  return onSnapshot(articlesRef, async (snap) => {
+    const deletedSlugs = await getDeletedSlugs();
     if (!snap.empty) {
       const cloudArticles = snap.docs.map(d => {
         const data = d.data();
@@ -191,12 +203,13 @@ export function subscribeArticles(callback: (articles: Article[]) => void): () =
           id: data.id || d.id,
           slug: data.slug || d.id
         } as Article;
-      });
+      }).filter(a => !deletedSlugs.has(a.slug));
       // Sort by publishedAt desc
       cloudArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
-      callback(mergeArticlesWithInitial(cloudArticles));
+      callback(mergeArticlesWithInitial(cloudArticles, deletedSlugs));
     } else {
-      callback(INITIAL_ARTICLES);
+      const fallback = INITIAL_ARTICLES.filter(a => !deletedSlugs.has(a.slug));
+      callback(fallback);
     }
   }, (err) => {
     console.warn("Real-time articles subscription failed, using local archive:", err);
@@ -206,6 +219,7 @@ export function subscribeArticles(callback: (articles: Article[]) => void): () =
 
 export async function fetchArticles(): Promise<{ articles: Article[]; source: 'firestore' | 'fallback' }> {
   try {
+    const deletedSlugs = await getDeletedSlugs();
     const snap = await getDocs(collection(db, 'articles'));
     if (!snap.empty) {
       const cloudArticles = snap.docs.map(d => {
@@ -215,10 +229,10 @@ export async function fetchArticles(): Promise<{ articles: Article[]; source: 'f
           id: data.id || d.id,
           slug: data.slug || d.id
         } as Article;
-      });
+      }).filter(a => !deletedSlugs.has(a.slug));
       cloudArticles.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
       return {
-        articles: mergeArticlesWithInitial(cloudArticles),
+        articles: mergeArticlesWithInitial(cloudArticles, deletedSlugs),
         source: 'firestore'
       };
     }
@@ -313,6 +327,10 @@ export async function syncAuthorToAllCloudArticles(author: {
 export async function deleteArticle(slug: string): Promise<void> {
   if (!slug) return;
   await deleteDoc(doc(db, 'articles', slug));
+  await setDoc(doc(db, 'deleted_articles', slug), {
+    slug,
+    deletedAt: serverTimestamp()
+  });
 }
 
 // ==========================================
@@ -392,19 +410,68 @@ export async function deleteArticleComment(articleSlug: string, commentId: strin
 }
 
 // ==========================================
-// 5. NEWSLETTER SUBSCRIBERS
+// 5. NEWSLETTER SUBSCRIBERS (CLOUD PERSISTENCE)
 // ==========================================
 
-export async function subscribeNewsletter(email: string): Promise<void> {
+export interface NewsletterSubscriber {
+  id: string;
+  email: string;
+  subscribedAt: string;
+}
+
+export async function subscribeNewsletter(email: string): Promise<{ status: 'success' | 'already_subscribed'; message: string }> {
   const cleanEmail = email.toLowerCase().trim();
-  if (!cleanEmail || !cleanEmail.includes('@')) {
-    throw new Error("Invalid email format.");
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+    throw new Error("Please enter a valid email address (e.g., name@domain.com).");
   }
-  const subDocRef = doc(db, 'newsletter_subscribers', cleanEmail.replace(/[^a-z0-9@._-]/g, '_'));
-  await setDoc(subDocRef, {
-    email: cleanEmail,
-    subscribedAt: serverTimestamp()
-  }, { merge: true });
+
+  // Safe document key for email
+  const docId = cleanEmail.replace(/[^a-z0-9@._-]/g, '_');
+  const subDocRef = doc(db, 'newsletter_subscribers', docId);
+
+  try {
+    await setDoc(subDocRef, {
+      email: cleanEmail,
+      subscribedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      active: true,
+      source: 'web_portal'
+    }, { merge: true });
+
+    return {
+      status: 'success',
+      message: 'You are subscribed to KRISHFICIENT architectural dispatches.'
+    };
+  } catch (error: any) {
+    console.error("Failed to persist newsletter subscriber:", error);
+    throw new Error(error.message || "Failed to register subscription. Please try again.");
+  }
+}
+
+export async function getNewsletterSubscribers(): Promise<NewsletterSubscriber[]> {
+  try {
+    const snap = await getDocs(collection(db, 'newsletter_subscribers'));
+    return snap.docs.map((d) => {
+      const data = d.data();
+      let dateStr = 'Recently';
+      if (data.subscribedAt?.toDate) {
+        dateStr = data.subscribedAt.toDate().toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        });
+      }
+      return {
+        id: d.id,
+        email: data.email || d.id,
+        subscribedAt: dateStr
+      };
+    });
+  } catch (error) {
+    console.warn("Could not load newsletter subscribers (admin privileges required):", error);
+    return [];
+  }
 }
 
 // ==========================================

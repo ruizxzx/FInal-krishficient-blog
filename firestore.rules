@@ -11,8 +11,13 @@ service cloud.firestore {
     function existing() { return resource.data; }
     function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
     
-    // We will hardcode the admin emails in the rule
-    function isAdmin() { return isSignedIn() && (request.auth.token.email in ['ruizxzxz@gmail.com', 'krishsarkar456@gmail.com']); }
+    // Hardcoded admin emails and UID fallback
+    function isAdmin() { 
+      return isSignedIn() && (
+        request.auth.token.get('email', '') in ['ruizxzxz@gmail.com', 'krishsarkar456@gmail.com', 'RUIZXZXZ@gmail.com', 'KRISHSARKAR456@gmail.com'] ||
+        request.auth.uid == 'ruizxzxz'
+      ); 
+    }
 
     // USER VALIDATION
     function isValidUser(data) {
@@ -222,6 +227,11 @@ service cloud.firestore {
           && incoming().authorId == existing().authorId;
         allow delete: if isSignedIn() && (request.auth.uid == existing().authorId || isAdmin());
       }
+    }
+
+    match /deleted_articles/{slug} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /admins/{userId} {

@@ -1,39 +1,47 @@
 export function formatDisplayDate(dateInput: any): string {
   if (!dateInput) return 'Just now';
   
-  // If it's a Firestore Timestamp object with toDate method
+  let dateObj: Date | null = null;
+
   if (typeof dateInput === 'object' && typeof dateInput.toDate === 'function') {
     try {
-      return dateInput.toDate().toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      });
+      dateObj = dateInput.toDate();
     } catch {
-      return 'Recently';
+      dateObj = null;
     }
-  }
-
-  // If it's a number (e.g. timestamp in ms)
-  if (typeof dateInput === 'number') {
-    return new Date(dateInput).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  }
-
-  // If it's a string
-  if (typeof dateInput === 'string') {
+  } else if (typeof dateInput === 'number') {
+    dateObj = new Date(dateInput);
+  } else if (typeof dateInput === 'string') {
     const parsed = new Date(dateInput);
     if (!isNaN(parsed.getTime())) {
-      return parsed.toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      });
+      dateObj = parsed;
     }
   }
 
-  return 'Recently';
+  if (!dateObj || isNaN(dateObj.getTime())) return 'Recently';
+
+  try {
+    return dateObj.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }) + ' IST';
+  } catch {
+    return dateObj.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }) + ' IST';
+  }
+}
+
+export function formatDisplayDateTime(dateInput: any): string {
+  return formatDisplayDate(dateInput);
 }

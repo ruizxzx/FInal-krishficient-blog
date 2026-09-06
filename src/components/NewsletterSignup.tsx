@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Sparkles, ArrowRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { subscribeNewsletter } from '../lib/cms';
 
 interface NewsletterSignupProps {
   variant?: 'sidebar' | 'footer' | 'inline';
@@ -12,24 +13,24 @@ export const NewsletterSignup: React.FC<NewsletterSignupProps> = ({ variant = 's
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(cleanEmail)) {
       setStatus('error');
-      setErrorMessage('Please enter a valid email address.');
+      setErrorMessage('Please enter a valid email address (e.g., name@domain.com).');
       return;
     }
 
     setStatus('loading');
+    setErrorMessage('');
 
-    // Simulate an API call to a mailing list provider (e.g., Mailchimp)
     try {
-      // In a real app, this would be a fetch to an API route that securely uses your API keys
-      // e.g., await fetch('/api/subscribe', { method: 'POST', body: JSON.stringify({ email }) })
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await subscribeNewsletter(cleanEmail);
       setStatus('success');
       setEmail('');
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Newsletter subscription failed:", error);
       setStatus('error');
-      setErrorMessage('Failed to subscribe. Please try again.');
+      setErrorMessage(error?.message || 'Failed to subscribe. Please try again.');
     }
   };
 

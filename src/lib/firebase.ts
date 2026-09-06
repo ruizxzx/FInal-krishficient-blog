@@ -1,30 +1,50 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { 
+  getAuth, 
+  GoogleAuthProvider, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult, 
+  signOut,
+  User 
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import appletConfig from '../../firebase-applet-config.json';
 
-// Production Firebase configuration from Vite environment variables
-// Falls back to applet config for local preview / AI Studio sandbox
+// Default production configuration for curious-studio-jc9s2
+const DEFAULT_FIREBASE_CONFIG = {
+  projectId: "curious-studio-jc9s2",
+  appId: "1:982833267948:web:79e114cde5eadf76b651c9",
+  apiKey: "AIzaSyAPKza-J91CER55Mi6ZBEVWx7pXSLglQEY",
+  authDomain: "curious-studio-jc9s2.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-krishficient-69d45b23-14d3-4f86-b489-0a437bf7a4e4",
+  storageBucket: "curious-studio-jc9s2.firebasestorage.app",
+  messagingSenderId: "982833267948",
+};
+
+// Production Firebase configuration prioritizing VITE_* environment variables
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || appletConfig.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || appletConfig.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || appletConfig.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || appletConfig.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || appletConfig.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || appletConfig.appId,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || DEFAULT_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || DEFAULT_FIREBASE_CONFIG.appId,
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
-// In AI Studio sandbox, appletConfig provides designated firestoreDatabaseId.
-// For production overrides, VITE_FIREBASE_DATABASE_ID can be specified.
-const dbId = import.meta.env.VITE_FIREBASE_DATABASE_ID || (appletConfig as any).firestoreDatabaseId;
+// Connect to designated Firestore database
+const dbId = import.meta.env.VITE_FIREBASE_DATABASE_ID || DEFAULT_FIREBASE_CONFIG.firestoreDatabaseId;
 
 export const db = dbId && dbId !== '(default)' ? getFirestore(app, dbId) : getFirestore(app);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
+
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+});
 
 export const ADMIN_EMAILS = [
   'ruizxzxz@gmail.com',
@@ -36,15 +56,54 @@ export const checkIsAdmin = (email?: string | null): boolean => {
   return ADMIN_EMAILS.includes(email.toLowerCase().trim());
 };
 
-export const loginWithGoogle = async () => {
+/**
+ * Signs in user via Google.
+ * Handles popups on desktop, gracefully handles cancellations without throwing errors,
+ * falls back to redirect when popups are blocked (e.g. mobile Safari / Chrome),
+ * and provides clear guidance if domain is unauthorized on Vercel.
+ */
+export const loginWithGoogle = async (): Promise<User | null> => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
+  } catch (error: any) {
+    // 1. User intentionally closed popup or cancelled request
+    if (
+      error?.code === 'auth/popup-closed-by-user' || 
+      error?.code === 'auth/cancelled-popup-request'
+    ) {
+      console.info("Google Sign-In was cancelled by the user.");
+      return null;
+    }
+
+    // 2. Popup was blocked by browser - fallback to redirect
+    if (error?.code === 'auth/popup-blocked') {
+      console.warn("Popup blocked by browser. Attempting sign-in with redirect...");
+      await signInWithRedirect(auth, googleProvider);
+      return null;
+    }
+
+    // 3. Unauthorized domain on Vercel or custom domain
+    if (error?.code === 'auth/unauthorized-domain') {
+      const hostname = typeof window !== 'undefined' ? window.location.hostname : 'current domain';
+      const msg = `Unauthorized domain: "${hostname}". Please add "${hostname}" and "krishficientblogx.vercel.app" to Firebase Console -> Authentication -> Settings -> Authorized Domains.`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+
     console.error("Error signing in with Google:", error);
     throw error;
   }
 };
+
+// Check for redirect result on page load (e.g. after mobile redirect auth)
+if (typeof window !== 'undefined') {
+  getRedirectResult(auth).catch((err) => {
+    if (err?.code !== 'auth/popup-closed-by-user') {
+      console.warn("Firebase redirect auth check:", err?.message);
+    }
+  });
+}
 
 export const logout = async () => {
   try {

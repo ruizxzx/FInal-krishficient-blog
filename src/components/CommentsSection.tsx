@@ -3,6 +3,7 @@ import { MessageSquare, Send, Clock, Trash2, LogIn } from 'lucide-react';
 import { auth, loginWithGoogle, checkIsAdmin } from '../lib/firebase';
 import { subscribeArticleComments, addArticleComment, deleteArticleComment } from '../lib/cms';
 import { ArticleComment } from '../types';
+import { formatDisplayDate } from '../lib/dateUtils';
 
 interface CommentsSectionProps {
   articleSlug: string;
@@ -216,7 +217,7 @@ export const CommentsSection: React.FC<CommentsSectionProps> = ({ articleSlug })
                   <div className="flex items-center space-x-3">
                     <div className="flex items-center space-x-1 text-neutral-500 font-mono text-[10px] font-bold uppercase">
                       <Clock className="w-3 h-3" />
-                      <span>{comment.createdAt}</span>
+                      <span>{formatDisplayDate(comment.createdAt)}</span>
                     </div>
 
                     {canDelete && (
