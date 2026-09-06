@@ -18,7 +18,8 @@ import {
   Database,
   Lock,
   ExternalLink,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from 'lucide-react';
 import { loginWithGoogle, auth, logout, checkIsAdmin, ADMIN_EMAILS } from '../lib/firebase';
 import { 
@@ -121,7 +122,12 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [editSlideLinkUrl, setEditSlideLinkUrl] = useState('');
   const [isUploadingEditSlideImage, setIsUploadingEditSlideImage] = useState(false);
   const [isSavingSlide, setIsSavingSlide] = useState(false);
+
+  // Deletion & Message States (No window.alert or window.confirm which fail in iframes)
+  const [deletingSlideId, setDeletingSlideId] = useState<string | null>(null);
+  const [isDeletingSlide, setIsDeletingSlide] = useState(false);
   const [carouselActionMessage, setCarouselActionMessage] = useState<string | null>(null);
+  const [carouselErrorMessage, setCarouselErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && isAuthenticated) {
@@ -129,13 +135,21 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     }
   }, [isOpen, isAuthenticated]);
 
+  useEffect(() => {
+    if (activeTab === 'carousel' && isAuthenticated) {
+      loadCarousel();
+    }
+  }, [activeTab, isAuthenticated]);
+
   const loadCarousel = async () => {
     setIsLoadingCarousel(true);
+    setCarouselErrorMessage(null);
     try {
       const slides = await getCarouselSlides();
       setCarouselSlides(slides);
-    } catch (e) {
+    } catch (e: any) {
       console.error("Error loading carousel slides:", e);
+      setCarouselErrorMessage("Failed to load slides from Firestore: " + (e.message || "Network error"));
     } finally {
       setIsLoadingCarousel(false);
     }
@@ -143,9 +157,10 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
   const handleAddSlide = async () => {
     if (!newSlideImageUrl.trim()) {
-      alert("Please provide an image URL or upload an image.");
+      setCarouselErrorMessage("Please provide an image URL or upload an image first.");
       return;
     }
+    setCarouselErrorMessage(null);
     try {
       const added = await addCarouselSlide({
         title: newSlideTitle.trim(),
@@ -153,7 +168,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
         linkUrl: newSlideLinkUrl.trim(),
         order: carouselSlides.length
       });
-      setCarouselSlides([...carouselSlides, added]);
+      setCarouselSlides(prev => [...prev, added]);
       setNewSlideTitle('');
       setNewSlideImageUrl('');
       setNewSlideLinkUrl('');
@@ -161,7 +176,34 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       setTimeout(() => setCarouselActionMessage(null), 4000);
     } catch (e: any) {
       console.error("Error adding carousel slide:", e);
-      alert('Failed to add slide to Firestore: ' + (e.message || 'Permission denied'));
+      setCarouselErrorMessage('Failed to add slide to Firestore: ' + (e.message || 'Permission denied'));
+    }
+  };
+
+  const handleSeedDefaultSlides = async () => {
+    setIsLoadingCarousel(true);
+    setCarouselErrorMessage(null);
+    try {
+      const s1 = await addCarouselSlide({
+        title: "Distributed Systems Masterclass & Architecture Deep-Dive",
+        imageUrl: "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1600&q=80",
+        linkUrl: "/#blog",
+        order: 0
+      });
+      const s2 = await addCarouselSlide({
+        title: "Building High-Throughput TypeScript Services in 2026",
+        imageUrl: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=1600&q=80",
+        linkUrl: "/#community",
+        order: 1
+      });
+      setCarouselSlides([s1, s2]);
+      setCarouselActionMessage("Default showcase slides created and synced to Firestore!");
+      setTimeout(() => setCarouselActionMessage(null), 4000);
+    } catch (e: any) {
+      console.error("Error seeding default slides:", e);
+      setCarouselErrorMessage("Failed to seed slides to Firestore: " + (e.message || "Permission denied"));
+    } finally {
+      setIsLoadingCarousel(false);
     }
   };
 
@@ -171,6 +213,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setEditSlideImageUrl(slide.imageUrl || '');
     setEditSlideLinkUrl(slide.linkUrl || '');
     setCarouselActionMessage(null);
+    setCarouselErrorMessage(null);
   };
 
   const handleCancelEditSlide = () => {
@@ -182,9 +225,10 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
   const handleSaveEditSlide = async (id: string) => {
     if (!editSlideImageUrl.trim()) {
-      alert("Slide image URL cannot be empty.");
+      setCarouselErrorMessage("Slide image URL cannot be empty.");
       return;
     }
+    setCarouselErrorMessage(null);
     setIsSavingSlide(true);
     try {
       await updateCarouselSlide(id, {
@@ -203,7 +247,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       setTimeout(() => setCarouselActionMessage(null), 4000);
     } catch (e: any) {
       console.error("Error saving slide:", e);
-      alert('Failed to update slide in Firestore: ' + (e.message || 'Permission denied'));
+      setCarouselErrorMessage('Failed to update slide in Firestore: ' + (e.message || 'Permission denied'));
     } finally {
       setIsSavingSlide(false);
     }
@@ -213,30 +257,35 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploadingEditSlideImage(true);
+    setCarouselErrorMessage(null);
     try {
       const url = await uploadImageToStorage(file, 'carousel');
       setEditSlideImageUrl(url);
     } catch (err: any) {
       console.error("Slide edit upload failed:", err);
-      alert("Failed to upload slide image: " + (err.message || "Upload error"));
+      setCarouselErrorMessage("Failed to upload slide image: " + (err.message || "Upload error"));
     } finally {
       setIsUploadingEditSlideImage(false);
     }
   };
 
-  const handleDeleteSlide = async (id: string) => {
-    if (!confirm('Are you sure you want to permanently delete this promotional slide from Firestore?')) return;
+  const executeDeleteSlide = async (id: string) => {
+    setIsDeletingSlide(true);
+    setCarouselErrorMessage(null);
     try {
       await deleteCarouselSlide(id);
       setCarouselSlides(prev => prev.filter(s => s.id !== id));
       if (editingSlideId === id) {
         setEditingSlideId(null);
       }
-      setCarouselActionMessage("Slide deleted successfully from cloud Firestore!");
+      setDeletingSlideId(null);
+      setCarouselActionMessage("Slide successfully deleted from cloud Firestore backend!");
       setTimeout(() => setCarouselActionMessage(null), 4000);
     } catch (e: any) {
-      console.error("Error deleting slide:", e);
-      alert('Failed to delete slide from Firestore: ' + (e.message || 'Permission denied'));
+      console.error("Error deleting slide from Firestore:", e);
+      setCarouselErrorMessage('Failed to delete slide from Firestore: ' + (e.message || 'Permission denied or network error'));
+    } finally {
+      setIsDeletingSlide(false);
     }
   };
 
@@ -1573,6 +1622,21 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                     </div>
                   )}
 
+                  {carouselErrorMessage && (
+                    <div className="mb-6 p-3 bg-red-100 border-2 border-red-600 neo-shadow-sm font-mono text-xs font-bold flex items-center justify-between text-red-900 animate-fadeIn">
+                      <div className="flex items-center space-x-2">
+                        <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                        <span>{carouselErrorMessage}</span>
+                      </div>
+                      <button 
+                        onClick={() => setCarouselErrorMessage(null)}
+                        className="p-1 hover:bg-red-200 rounded"
+                      >
+                        <X className="w-3.5 h-3.5 text-red-900" />
+                      </button>
+                    </div>
+                  )}
+
                   {/* Add New Slide Card */}
                   <div className="bg-white border-2 border-black p-5 shadow-[4px_4px_0_0_#000] mb-8 space-y-4">
                     <div className="flex items-center space-x-2 border-b-2 border-black pb-2">
@@ -1672,8 +1736,19 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                         <span className="font-mono text-xs text-neutral-500">Syncing with Firestore...</span>
                       </div>
                     ) : carouselSlides.length === 0 ? (
-                      <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500 bg-white">
-                        No carousel slides found in Firestore. Add your first promotional slide above.
+                      <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-600 bg-white space-y-4">
+                        <p>No carousel slides found in Firestore backend.</p>
+                        <p className="text-xs text-neutral-400 max-w-md mx-auto">
+                          Add a custom slide using the form above, or click below to seed default high-resolution showcase slides into Firestore.
+                        </p>
+                        <button
+                          onClick={handleSeedDefaultSlides}
+                          disabled={isLoadingCarousel}
+                          className="px-4 py-2 bg-black text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black border-2 border-black font-mono text-xs font-bold uppercase neo-shadow-sm inline-flex items-center space-x-2 transition-colors cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4" />
+                          <span>SEED DEFAULT SHOWCASE SLIDES</span>
+                        </button>
                       </div>
                     ) : (
                       <div className="space-y-4">
@@ -1851,14 +1926,40 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                                   <Edit2 className="w-3.5 h-3.5" />
                                   <span>EDIT</span>
                                 </button>
-                                <button 
-                                  onClick={() => handleDeleteSlide(slide.id)} 
-                                  className="px-3 py-1.5 bg-white hover:bg-red-600 text-black hover:text-white border-2 border-black neo-shadow-sm font-mono text-xs font-bold uppercase flex items-center space-x-1.5 active:translate-x-0.5 active:translate-y-0.5 transition-all"
-                                  title="Delete slide from Firestore"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>DELETE</span>
-                                </button>
+
+                                {deletingSlideId === slide.id ? (
+                                  <div className="flex items-center space-x-1.5 bg-red-100 border-2 border-red-600 p-1.5 animate-fadeIn">
+                                    <span className="font-mono text-[10px] font-bold text-red-900 hidden lg:inline">Confirm?</span>
+                                    <button 
+                                      onClick={() => executeDeleteSlide(slide.id)} 
+                                      disabled={isDeletingSlide}
+                                      className="px-2.5 py-1 bg-red-600 hover:bg-black text-white border border-black font-mono text-xs font-bold uppercase flex items-center space-x-1 transition-colors cursor-pointer"
+                                      title="Permanently remove from Firestore backend"
+                                    >
+                                      <Trash2 className={`w-3 h-3 ${isDeletingSlide ? 'animate-spin' : ''}`} />
+                                      <span>{isDeletingSlide ? 'DELETING...' : 'YES, DELETE'}</span>
+                                    </button>
+                                    <button 
+                                      onClick={() => setDeletingSlideId(null)} 
+                                      disabled={isDeletingSlide}
+                                      className="px-2 py-1 bg-white hover:bg-neutral-100 text-black border border-black font-mono text-xs font-bold uppercase transition-colors cursor-pointer"
+                                    >
+                                      CANCEL
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button 
+                                    onClick={() => {
+                                      setDeletingSlideId(slide.id);
+                                      setCarouselErrorMessage(null);
+                                    }} 
+                                    className="px-3 py-1.5 bg-white hover:bg-red-600 text-black hover:text-white border-2 border-black neo-shadow-sm font-mono text-xs font-bold uppercase flex items-center space-x-1.5 active:translate-x-0.5 active:translate-y-0.5 transition-all cursor-pointer"
+                                    title="Delete slide from Firestore"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>DELETE</span>
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );

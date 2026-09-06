@@ -94,6 +94,20 @@
         "createdAt": { "type": "string" }
       },
       "required": ["slug", "userId", "createdAt"]
+    },
+    "CarouselSlide": {
+      "title": "CarouselSlide",
+      "description": "Promotional carousel slide on the homepage",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "maxLength": 256 },
+        "imageUrl": { "type": "string", "maxLength": 2048 },
+        "linkUrl": { "type": "string", "maxLength": 2048 },
+        "order": { "type": "number" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["imageUrl", "order"]
     }
   },
   "firestore": {
@@ -124,6 +138,10 @@
     "articleLikes/{slug}/likes/{userId}": {
       "schema": "ArticleLike",
       "description": "Likes from users for main site articles"
+    },
+    "carousel_slides/{slideId}": {
+      "schema": "CarouselSlide",
+      "description": "Promotional carousel slides configured by administrators"
     }
   }
 }
