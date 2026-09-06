@@ -104,9 +104,10 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
   const canDeletePost = activeUser && (activeUser.uid === post?.authorId || isAdmin);
 
   const handleDeletePost = async () => {
-    if (!confirm('Are you sure you want to permanently delete this post from Firestore?')) return;
+    if (!confirm('Are you sure you want to permanently delete this post from the database?')) return;
     try {
       await deletePost(postId);
+      alert('Post successfully deleted from the database and site!');
       onNavigate('community');
     } catch (e: any) {
       console.error(e);
@@ -115,7 +116,9 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
   };
 
   const handleDeleteComment = async (commentId: string, commentAuthorId: string) => {
-    const canDeleteComment = userAuth && (userAuth.uid === commentAuthorId || isAdmin);
+    const activeUser = auth.currentUser || userAuth;
+    const currentIsAdmin = checkIsAdmin(activeUser?.email);
+    const canDeleteComment = activeUser && (activeUser.uid === commentAuthorId || currentIsAdmin);
     if (!canDeleteComment) {
       alert('You do not have permission to delete this comment.');
       return;
@@ -125,6 +128,7 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
       await deleteComment(postId, commentId);
       setComments(comments.filter(c => c.id !== commentId));
       if (post) setPost({ ...post, commentsCount: Math.max(0, post.commentsCount - 1) });
+      alert('Comment successfully deleted from database!');
     } catch (e: any) {
       console.error(e);
       alert('Failed to delete comment: ' + (e?.message || 'Permission denied'));

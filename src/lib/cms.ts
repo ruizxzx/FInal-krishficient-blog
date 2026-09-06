@@ -12,7 +12,8 @@ import {
   Timestamp 
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from './firebase';
+import { db, storage, auth, checkIsAdmin } from './firebase';
+import { deletePost } from './community';
 import { Article, SiteConfig, BentoLink, ArticleComment } from '../types';
 import { INITIAL_ARTICLES } from '../data/articles';
 
@@ -431,22 +432,44 @@ export async function subscribeNewsletter(email: string): Promise<{ status: 'suc
   const subDocRef = doc(db, 'newsletter_subscribers', docId);
 
   try {
+    const snap = await getDoc(subDocRef);
+    if (snap.exists()) {
+      return {
+        status: 'already_subscribed',
+        message: 'This email address is already subscribed to KRISHFICIENT dispatches.'
+      };
+    }
+
     await setDoc(subDocRef, {
       email: cleanEmail,
       subscribedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       active: true,
       source: 'web_portal'
-    }, { merge: true });
+    });
 
     return {
       status: 'success',
-      message: 'You are subscribed to KRISHFICIENT architectural dispatches.'
+      message: 'You are successfully subscribed to KRISHFICIENT architectural dispatches.'
     };
   } catch (error: any) {
     console.error("Failed to persist newsletter subscriber:", error);
     throw new Error(error.message || "Failed to register subscription. Please try again.");
   }
+}
+
+export async function adminDeleteCommunityPost(postId: string): Promise<void> {
+  if (!auth.currentUser || !checkIsAdmin(auth.currentUser.email)) {
+    throw new Error("Unauthorized: Admin privileges required.");
+  }
+  await deletePost(postId);
+}
+
+export async function adminDeleteArticle(slug: string): Promise<void> {
+  if (!auth.currentUser || !checkIsAdmin(auth.currentUser.email)) {
+    throw new Error("Unauthorized: Admin privileges required.");
+  }
+  await deleteArticle(slug);
 }
 
 export async function getNewsletterSubscribers(): Promise<NewsletterSubscriber[]> {

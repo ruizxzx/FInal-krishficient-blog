@@ -92,28 +92,28 @@ export const Header: React.FC<HeaderProps> = ({
     <>
       {/* Sticky Top Header - Rock solid, never glitches, never overlaps bottom content */}
       <header className="sticky top-0 z-50 w-full bg-white border-b-4 border-black neo-shadow-sm select-none">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-2 sm:gap-4">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 h-16 sm:h-20 flex items-center justify-between gap-1.5 sm:gap-4">
           
           {/* Brand / Logo */}
-          <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex items-center space-x-2 shrink-0 min-w-0">
             <button
               onClick={() => handleNavClick('home')}
-              className="flex items-center space-x-2.5 group text-left focus:outline-none p-1 border-2 border-black neo-shadow-sm hover:bg-[var(--color-primary)] transition-all active:translate-x-0.5 active:translate-y-0.5"
+              className="flex items-center space-x-2 group text-left focus:outline-none p-1 border-2 border-black neo-shadow-sm hover:bg-[var(--color-primary)] transition-all active:translate-x-0.5 active:translate-y-0.5 max-w-[190px] xs:max-w-none truncate"
               title="Return to Homepage"
             >
               {siteConfig.logoImageUrl ? (
                 <img 
                   src={siteConfig.logoImageUrl} 
                   alt={siteConfig.logoPart1 || 'Logo'} 
-                  className="w-8 h-8 sm:w-9 sm:h-9 object-cover border border-black bg-neutral-100" 
+                  className="w-7 h-7 sm:w-9 sm:h-9 object-cover border border-black bg-neutral-100 shrink-0" 
                 />
               ) : (
-                <div className="w-8 h-8 sm:w-9 sm:h-9 bg-black text-[var(--color-primary)] flex items-center justify-center font-display font-black text-lg border border-black group-hover:bg-white group-hover:text-black transition-colors">
+                <div className="w-7 h-7 sm:w-9 sm:h-9 bg-black text-[var(--color-primary)] flex items-center justify-center font-display font-black text-base sm:text-lg border border-black group-hover:bg-white group-hover:text-black transition-colors shrink-0">
                   {(siteConfig.logoPart1 || 'K').charAt(0)}
                 </div>
               )}
-              <div className="flex flex-col pr-1">
-                <span className="font-display font-black text-lg sm:text-2xl tracking-tighter leading-none text-black">
+              <div className="flex flex-col pr-1 min-w-0">
+                <span className="font-display font-black text-base sm:text-2xl tracking-tighter leading-none text-black truncate">
                   {siteConfig.logoPart1 || 'KRISH'}<span className="text-[var(--color-accent)]">{siteConfig.logoPart2 || 'FICIENT'}</span>
                 </span>
                 <span className="font-mono text-[9px] sm:text-[10px] uppercase font-bold text-neutral-500 tracking-wider hidden xs:block">

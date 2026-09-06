@@ -49,7 +49,7 @@ export const Hero: React.FC<HeroProps> = ({ onNavigate, postsCount, siteConfig }
             </div>
 
             {/* Giant High Density Headline */}
-            <h1 className="text-6xl sm:text-7xl lg:text-[88px] xl:text-[96px] leading-[0.85] font-black tracking-tighter uppercase text-black whitespace-pre-wrap">
+            <h1 className="text-4xl xs:text-5xl sm:text-7xl lg:text-[88px] xl:text-[96px] leading-[0.9] sm:leading-[0.85] font-black tracking-tighter uppercase text-black whitespace-pre-wrap break-words">
               {siteConfig.heroHeadline}
             </h1>
 

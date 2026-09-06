@@ -22,12 +22,22 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
   const [isFollowing, setIsFollowing] = useState(false);
   const [isFollowLoading, setIsFollowLoading] = useState(false);
   
-  const isOwner = auth.currentUser && profile && auth.currentUser.uid === profile.uid;
-  const isAdmin = checkIsAdmin(auth.currentUser?.email);
+  const [userAuth, setUserAuth] = useState(auth.currentUser);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged((user) => {
+      setUserAuth(user);
+    });
+    return () => unsub();
+  }, []);
+
+  const activeUser = auth.currentUser || userAuth;
+  const isOwner = activeUser && profile && activeUser.uid === profile.uid;
+  const isAdmin = checkIsAdmin(activeUser?.email);
 
   const handleDeletePost = async (postId: string, authorId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const currentUser = auth.currentUser;
+    const currentUser = auth.currentUser || userAuth;
     const currentIsAdmin = checkIsAdmin(currentUser?.email);
     if (!currentUser || (!currentIsAdmin && currentUser.uid !== authorId)) {
       alert('You do not have permission to delete this post.');
@@ -37,6 +47,7 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
     try {
       await deletePost(postId);
       setPosts(posts.filter(p => p.id !== postId));
+      alert('Post successfully deleted from database and site!');
     } catch (err: any) {
       console.error(err);
       alert('Failed to delete post: ' + (err?.message || 'Permission denied'));
@@ -264,7 +275,7 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
                 <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase">
                   {post.type}
                 </div>
-                {auth.currentUser && (auth.currentUser.uid === post.authorId || checkIsAdmin(auth.currentUser?.email)) && (
+                {activeUser && (activeUser.uid === post.authorId || checkIsAdmin(activeUser?.email)) && (
                   <button
                     onClick={(e) => handleDeletePost(post.id, post.authorId, e)}
                     className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-black transition-colors"

@@ -150,6 +150,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     try {
       await deletePost(postId);
       setPosts(posts.filter(p => p.id !== postId));
+      alert('Post successfully deleted from database and site!');
     } catch (err: any) {
       console.error(err);
       alert('Failed to delete post: ' + (err?.message || 'Permission denied'));
