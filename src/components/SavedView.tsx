@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Article, PageView, CommunityPost, CommunityUser } from '../types';
+import { Article, PageView, CommunityPost, CommunityUser, SiteConfig } from '../types';
 import { ArticleCard } from './ArticleCard';
 import { Bookmark, ArrowRight, Trash2, CheckCircle2, Cloud, Sparkles, MessageSquare, ThumbsUp, LogIn } from 'lucide-react';
 import { getPost } from '../lib/community';
@@ -15,6 +15,7 @@ interface SavedViewProps {
   onToggleSaveCommunityPost: (postId: string) => void;
   userAuth?: FirebaseUser | null;
   userProfile?: CommunityUser | null;
+  siteConfig?: SiteConfig;
 }
 
 export const SavedView: React.FC<SavedViewProps> = ({ 
@@ -25,7 +26,8 @@ export const SavedView: React.FC<SavedViewProps> = ({
   onToggleSaveArticle,
   onToggleSaveCommunityPost,
   userAuth,
-  userProfile
+  userProfile,
+  siteConfig
 }) => {
   const [savedPosts, setSavedPosts] = useState<CommunityPost[]>([]);
   const [loadingPosts, setLoadingPosts] = useState(false);
@@ -198,6 +200,7 @@ export const SavedView: React.FC<SavedViewProps> = ({
                       onSelect={(slug) => onNavigate('article', slug)}
                       isSaved={true}
                       onToggleSave={onToggleSaveArticle}
+                      siteConfig={siteConfig}
                     />
                   ))}
                 </div>

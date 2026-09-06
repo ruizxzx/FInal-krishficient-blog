@@ -316,7 +316,7 @@ export default function App() {
   const activeArticle = articles.find((a) => a.slug === activeArticleSlug);
 
   return (
-    <div className="min-h-screen flex flex-col bg-white text-black font-sans selection:bg-[var(--color-primary)] selection:text-black pb-28">
+    <div className="min-h-screen flex flex-col bg-white text-black font-sans selection:bg-[var(--color-primary)] selection:text-black">
       {/* Top Header */}
       <Header
         currentPage={currentPage}
@@ -328,9 +328,6 @@ export default function App() {
         userProfile={userProfile}
         onOpenHandleModal={() => setIsHandleModalOpen(true)}
       />
-
-      {/* Spacer for Top Fixed Logo */}
-      <div className="pt-20 sm:pt-24" />
 
       {/* Marquee Ticker */}
       <MarqueeTicker />
@@ -372,6 +369,7 @@ export default function App() {
                 onToggleSave={handleToggleSave}
                 selectedCategory={selectedCategory}
                 onSelectCategory={setSelectedCategory}
+                siteConfig={siteConfig}
               />
             )}
 
@@ -421,6 +419,7 @@ export default function App() {
                 onToggleSaveCommunityPost={handleToggleSaveCommunity}
                 userAuth={userAuth}
                 userProfile={userProfile}
+                siteConfig={siteConfig}
               />
             )}
 

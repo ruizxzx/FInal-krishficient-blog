@@ -17,7 +17,8 @@ import {
   Upload, 
   Database,
   Lock,
-  ExternalLink
+  ExternalLink,
+  Sparkles
 } from 'lucide-react';
 import { loginWithGoogle, auth, logout, checkIsAdmin, ADMIN_EMAILS } from '../lib/firebase';
 import { 
@@ -25,7 +26,9 @@ import {
   deleteArticle, 
   saveSiteConfig, 
   saveBentoLinks, 
-  uploadImageToStorage 
+  uploadImageToStorage,
+  setArticleFeaturedStatus,
+  syncAuthorToAllCloudArticles
 } from '../lib/cms';
 import { 
   getCarouselSlides, 
@@ -111,6 +114,15 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [newSlideLinkUrl, setNewSlideLinkUrl] = useState('');
   const [isUploadingSlideImage, setIsUploadingSlideImage] = useState(false);
 
+  // Carousel Editing State
+  const [editingSlideId, setEditingSlideId] = useState<string | null>(null);
+  const [editSlideTitle, setEditSlideTitle] = useState('');
+  const [editSlideImageUrl, setEditSlideImageUrl] = useState('');
+  const [editSlideLinkUrl, setEditSlideLinkUrl] = useState('');
+  const [isUploadingEditSlideImage, setIsUploadingEditSlideImage] = useState(false);
+  const [isSavingSlide, setIsSavingSlide] = useState(false);
+  const [carouselActionMessage, setCarouselActionMessage] = useState<string | null>(null);
+
   useEffect(() => {
     if (isOpen && isAuthenticated) {
       loadCarousel();
@@ -145,20 +157,86 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       setNewSlideTitle('');
       setNewSlideImageUrl('');
       setNewSlideLinkUrl('');
+      setCarouselActionMessage("New slide added and synced to cloud Firestore!");
+      setTimeout(() => setCarouselActionMessage(null), 4000);
     } catch (e: any) {
       console.error("Error adding carousel slide:", e);
       alert('Failed to add slide to Firestore: ' + (e.message || 'Permission denied'));
     }
   };
 
+  const handleStartEditSlide = (slide: CarouselSlide) => {
+    setEditingSlideId(slide.id);
+    setEditSlideTitle(slide.title || '');
+    setEditSlideImageUrl(slide.imageUrl || '');
+    setEditSlideLinkUrl(slide.linkUrl || '');
+    setCarouselActionMessage(null);
+  };
+
+  const handleCancelEditSlide = () => {
+    setEditingSlideId(null);
+    setEditSlideTitle('');
+    setEditSlideImageUrl('');
+    setEditSlideLinkUrl('');
+  };
+
+  const handleSaveEditSlide = async (id: string) => {
+    if (!editSlideImageUrl.trim()) {
+      alert("Slide image URL cannot be empty.");
+      return;
+    }
+    setIsSavingSlide(true);
+    try {
+      await updateCarouselSlide(id, {
+        title: editSlideTitle.trim(),
+        imageUrl: editSlideImageUrl.trim(),
+        linkUrl: editSlideLinkUrl.trim()
+      });
+      setCarouselSlides(prev => prev.map(s => s.id === id ? {
+        ...s,
+        title: editSlideTitle.trim(),
+        imageUrl: editSlideImageUrl.trim(),
+        linkUrl: editSlideLinkUrl.trim()
+      } : s));
+      setEditingSlideId(null);
+      setCarouselActionMessage("Carousel slide successfully updated in cloud Firestore!");
+      setTimeout(() => setCarouselActionMessage(null), 4000);
+    } catch (e: any) {
+      console.error("Error saving slide:", e);
+      alert('Failed to update slide in Firestore: ' + (e.message || 'Permission denied'));
+    } finally {
+      setIsSavingSlide(false);
+    }
+  };
+
+  const handleEditSlideUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingEditSlideImage(true);
+    try {
+      const url = await uploadImageToStorage(file, 'carousel');
+      setEditSlideImageUrl(url);
+    } catch (err: any) {
+      console.error("Slide edit upload failed:", err);
+      alert("Failed to upload slide image: " + (err.message || "Upload error"));
+    } finally {
+      setIsUploadingEditSlideImage(false);
+    }
+  };
+
   const handleDeleteSlide = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this promotional slide?')) return;
+    if (!confirm('Are you sure you want to permanently delete this promotional slide from Firestore?')) return;
     try {
       await deleteCarouselSlide(id);
-      setCarouselSlides(carouselSlides.filter(s => s.id !== id));
+      setCarouselSlides(prev => prev.filter(s => s.id !== id));
+      if (editingSlideId === id) {
+        setEditingSlideId(null);
+      }
+      setCarouselActionMessage("Slide deleted successfully from cloud Firestore!");
+      setTimeout(() => setCarouselActionMessage(null), 4000);
     } catch (e: any) {
       console.error("Error deleting slide:", e);
-      alert('Failed to delete slide: ' + (e.message || 'Permission denied'));
+      alert('Failed to delete slide from Firestore: ' + (e.message || 'Permission denied'));
     }
   };
 
@@ -282,6 +360,21 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
       };
       await saveSiteConfig(updated);
       onUpdateSiteConfig(updated);
+
+      // Also automatically sync author details across all cloud articles if author profile changed
+      if (authorName !== siteConfig.authorName || authorRole !== siteConfig.authorRole || authorAvatarUrl !== siteConfig.authorAvatarUrl) {
+        try {
+          await syncAuthorToAllCloudArticles({
+            name: authorName,
+            role: authorRole,
+            avatar: authorAvatarUrl,
+            bio: manifestoText || aboutMeBio
+          });
+        } catch (syncErr) {
+          console.warn("Auto-sync author to articles encountered an issue:", syncErr);
+        }
+      }
+
       setConfigSuccess(true);
       setTimeout(() => setConfigSuccess(false), 2000);
     } catch (err: any) {
@@ -309,10 +402,68 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   const [newCodeLanguage, setNewCodeLanguage] = useState('typescript');
   const [newCodeSnippet, setNewCodeSnippet] = useState('');
   const [newTakeaway, setNewTakeaway] = useState('');
+  const [newIsFeatured, setNewIsFeatured] = useState(false);
+  const [newIsPinned, setNewIsPinned] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+
+  // Author avatar upload & cloud sync state
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isSyncingAuthor, setIsSyncingAuthor] = useState(false);
+  const [syncAuthorSuccess, setSyncAuthorSuccess] = useState<string | null>(null);
+  const [togglingFeaturedSlug, setTogglingFeaturedSlug] = useState<string | null>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingAvatar(true);
+    try {
+      const url = await uploadImageToStorage(file, 'avatars');
+      setAuthorAvatarUrl(url);
+    } catch (err: any) {
+      console.error("Failed to upload avatar image:", err);
+      alert("Avatar upload failed: " + (err.message || 'Permission denied'));
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
+  const handleSyncAuthorToArticles = async () => {
+    if (!confirm(`Do you want to sync the author profile (Name: "${authorName}", Role: "${authorRole}") to ALL articles stored in Firestore cloud database?`)) return;
+    setIsSyncingAuthor(true);
+    setSyncAuthorSuccess(null);
+    try {
+      const count = await syncAuthorToAllCloudArticles({
+        name: authorName,
+        role: authorRole,
+        avatar: authorAvatarUrl,
+        bio: manifestoText || aboutMeBio
+      });
+      setSyncAuthorSuccess(`Synced author details to ${count} articles in Firestore!`);
+      setTimeout(() => setSyncAuthorSuccess(null), 4000);
+    } catch (err: any) {
+      console.error("Failed to sync author to articles:", err);
+      alert("Sync failed: " + (err.message || 'Permission denied'));
+    } finally {
+      setIsSyncingAuthor(false);
+    }
+  };
+
+  const handleToggleFeatured = async (art: Article) => {
+    const isCurrentlyFeatured = !!art.featured || !!art.pinned;
+    const newFeaturedState = !isCurrentlyFeatured;
+    setTogglingFeaturedSlug(art.slug);
+    try {
+      await setArticleFeaturedStatus(art, newFeaturedState, newFeaturedState);
+    } catch (err: any) {
+      console.error("Failed to update article featured status in Firestore:", err);
+      alert("Failed to update featured status: " + (err.message || 'Permission denied'));
+    } finally {
+      setTogglingFeaturedSlug(null);
+    }
+  };
 
   // Bento Links state
   const [bentoTitle, setBentoTitle] = useState('');
@@ -420,15 +571,16 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
         coverImage: newCoverImage.trim() || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop',
         coverImageAlt: newCoverAlt || newTitle,
         coverImageCaption: newCoverCaption,
-        featured: false,
+        featured: newIsFeatured || newIsPinned,
+        pinned: newIsPinned || newIsFeatured,
         trending: true,
         viewsCount: 1,
         clapsCount: 0,
         author: {
-          name: siteConfig.authorName || 'Krish',
-          role: siteConfig.authorRole || 'Founder & Systems Architect',
-          avatar: siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-          bio: siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.'
+          name: authorName || siteConfig.authorName || 'Krish',
+          role: authorRole || siteConfig.authorRole || 'Founder & Systems Architect',
+          avatar: authorAvatarUrl || siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
+          bio: manifestoText || aboutMeBio || siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.'
         },
         content: [
           {
@@ -487,6 +639,8 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setNewCodeSnippet(code?.codeBlock?.code || '');
     setNewCodeLanguage(code?.codeBlock?.language || 'typescript');
     setNewTakeaway(takeaways?.items?.[0] || '');
+    setNewIsFeatured(!!article.featured || !!article.pinned);
+    setNewIsPinned(!!article.pinned || !!article.featured);
   };
 
   const handleDeleteArticleClick = async (slug: string) => {
@@ -511,6 +665,8 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setNewParagraph1('');
     setNewCodeSnippet('');
     setNewTakeaway('');
+    setNewIsFeatured(false);
+    setNewIsPinned(false);
     setNewCoverImage('https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop');
     setPublishError(null);
   };
@@ -750,29 +906,114 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                   </div>
 
                   {/* AUTHOR / ABOUT */}
-                  <div className="space-y-4">
-                    <h4 className="font-display font-black text-lg uppercase border-b-2 border-black pb-1">Author &amp; About Profile</h4>
-                    <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-4 p-4 bg-gray-50 border-2 border-black">
+                    <div className="flex items-center justify-between border-b-2 border-black pb-2">
+                      <div>
+                        <h4 className="font-display font-black text-lg uppercase text-black">Author &amp; About Profile</h4>
+                        <p className="font-mono text-xs text-neutral-600">
+                          These author details reflect on all personal essays, article pages, and bio cards across the site.
+                        </p>
+                      </div>
+                      <span className="px-2 py-0.5 bg-[var(--color-primary)] text-black font-mono text-[10px] font-bold border border-black uppercase">
+                        GLOBAL AUTHOR
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="font-mono text-xs font-bold uppercase text-black">Author Name</label>
-                        <input type="text" value={authorName} onChange={(e) => setAuthorName(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                        <input 
+                          type="text" 
+                          value={authorName} 
+                          onChange={(e) => setAuthorName(e.target.value)} 
+                          className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white" 
+                          placeholder="Krish"
+                        />
                       </div>
                       <div className="space-y-1">
                         <label className="font-mono text-xs font-bold uppercase text-black">Author Role</label>
-                        <input type="text" value={authorRole} onChange={(e) => setAuthorRole(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                        <input 
+                          type="text" 
+                          value={authorRole} 
+                          onChange={(e) => setAuthorRole(e.target.value)} 
+                          className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white" 
+                          placeholder="Founder & Systems Architect"
+                        />
                       </div>
                     </div>
-                    <div className="space-y-1">
-                      <label className="font-mono text-xs font-bold uppercase text-black">Avatar Image URL</label>
-                      <input type="text" value={authorAvatarUrl} onChange={(e) => setAuthorAvatarUrl(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none" />
+
+                    {/* Avatar Preview and URL / Upload */}
+                    <div className="space-y-2">
+                      <label className="font-mono text-xs font-bold uppercase text-black">Author Picture (Avatar)</label>
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                        <img 
+                          src={authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop'} 
+                          alt="Author Preview" 
+                          className="w-16 h-16 border-2 border-black object-cover bg-white shrink-0 neo-shadow-sm"
+                        />
+                        <div className="flex-1 w-full space-y-1.5">
+                          <input 
+                            type="text" 
+                            value={authorAvatarUrl} 
+                            onChange={(e) => setAuthorAvatarUrl(e.target.value)} 
+                            className="w-full px-3 py-2 border-2 border-black font-mono text-xs focus:outline-none bg-white" 
+                            placeholder="https://images.unsplash.com/..."
+                          />
+                          <div className="flex items-center gap-2">
+                            <label className="cursor-pointer inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white border-2 border-black font-display font-black text-xs uppercase hover:bg-neutral-100 active:translate-x-0.5 active:translate-y-0.5 transition-all">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>{isUploadingAvatar ? 'UPLOADING...' : 'UPLOAD PICTURE'}</span>
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                onChange={handleAvatarUpload} 
+                                disabled={isUploadingAvatar}
+                                className="hidden" 
+                              />
+                            </label>
+                            <span className="font-mono text-[10px] text-neutral-500">JPG, PNG, WebP</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
+
                     <div className="space-y-1">
                       <label className="font-mono text-xs font-bold uppercase text-black">About Section Title</label>
-                      <input type="text" value={aboutMeTitle} onChange={(e) => setAboutMeTitle(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none" />
+                      <input 
+                        type="text" 
+                        value={aboutMeTitle} 
+                        onChange={(e) => setAboutMeTitle(e.target.value)} 
+                        className="w-full px-3 py-2 border-2 border-black font-bold focus:outline-none bg-white" 
+                      />
                     </div>
                     <div className="space-y-1">
                       <label className="font-mono text-xs font-bold uppercase text-black">About Bio</label>
-                      <textarea rows={4} value={aboutMeBio} onChange={(e) => setAboutMeBio(e.target.value)} className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none" />
+                      <textarea 
+                        rows={3} 
+                        value={aboutMeBio} 
+                        onChange={(e) => setAboutMeBio(e.target.value)} 
+                        className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none bg-white" 
+                      />
+                    </div>
+
+                    {/* Sync to all Cloud Articles Button */}
+                    <div className="pt-2 border-t-2 border-black flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSyncAuthorToArticles}
+                        disabled={isSyncingAuthor}
+                        className="px-4 py-2 bg-black text-white font-display font-black text-xs uppercase border-2 border-black hover:bg-[var(--color-primary)] hover:text-black transition-all flex items-center space-x-1.5 active:translate-x-0.5 active:translate-y-0.5"
+                      >
+                        <RefreshCw className={`w-3.5 h-3.5 ${isSyncingAuthor ? 'animate-spin' : ''}`} />
+                        <span>{isSyncingAuthor ? 'SYNCING TO CLOUD ARTICLES...' : 'SYNC AUTHOR TO ALL CLOUD ARTICLES'}</span>
+                      </button>
+
+                      {syncAuthorSuccess && (
+                        <div className="px-3 py-1.5 bg-green-100 border border-green-800 text-green-900 font-mono text-xs font-bold flex items-center space-x-1.5">
+                          <Check className="w-3.5 h-3.5 text-green-800" />
+                          <span>{syncAuthorSuccess}</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1041,6 +1282,33 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                       />
                     </div>
 
+                    {/* Homepage Feature / Pin Controls */}
+                    <div className="p-4 bg-[var(--color-primary)]/20 border-2 border-black space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <Sparkles className="w-4 h-4 fill-black text-black" />
+                        <h5 className="font-display font-black text-sm uppercase text-black">
+                          HOMEPAGE FEATURE &amp; PIN CONTROL
+                        </h5>
+                      </div>
+                      <p className="font-mono text-xs text-neutral-700">
+                        Marking this article as Featured / Pinned will elevate it to the main featured headline on the homepage and the top editorial spotlight.
+                      </p>
+                      <label className="flex items-center space-x-3 cursor-pointer select-none bg-white p-3 border-2 border-black hover:bg-neutral-50 transition-colors">
+                        <input
+                          type="checkbox"
+                          checked={newIsFeatured || newIsPinned}
+                          onChange={(e) => {
+                            setNewIsFeatured(e.target.checked);
+                            setNewIsPinned(e.target.checked);
+                          }}
+                          className="w-5 h-5 accent-black border-2 border-black cursor-pointer"
+                        />
+                        <span className="font-display font-black text-xs uppercase text-black">
+                          PIN AS MAIN FEATURED ARTICLE ON HOMEPAGE
+                        </span>
+                      </label>
+                    </div>
+
                     <div className="flex items-center space-x-3 pt-2">
                       <button
                         type="submit"
@@ -1090,13 +1358,19 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                       className="p-4 border-2 border-black bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 neo-shadow-sm"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center space-x-2 mb-1">
+                        <div className="flex items-center space-x-2 mb-1 flex-wrap gap-y-1">
                           <span className="bg-black text-white font-mono text-[9px] font-bold px-1.5 py-0.5 uppercase">
                             {art.category}
                           </span>
                           <span className="font-mono text-[10px] text-neutral-500">
                             {art.publishedAt}
                           </span>
+                          {(art.featured || art.pinned) && (
+                            <span className="bg-[var(--color-primary)] text-black font-mono text-[9px] font-bold px-1.5 py-0.5 border border-black uppercase flex items-center space-x-1">
+                              <Sparkles className="w-2.5 h-2.5 fill-black text-black" />
+                              <span>FEATURED ON HOMEPAGE</span>
+                            </span>
+                          )}
                         </div>
                         <h4 className="font-display font-black text-base truncate text-black">
                           {art.title}
@@ -1106,7 +1380,24 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                         </p>
                       </div>
 
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 flex-wrap sm:flex-nowrap gap-y-1">
+                        <button
+                          onClick={() => handleToggleFeatured(art)}
+                          disabled={togglingFeaturedSlug === art.slug}
+                          className={`px-3 py-1.5 border-2 border-black font-mono text-xs font-bold uppercase transition-colors flex items-center space-x-1 ${
+                            art.featured || art.pinned
+                              ? 'bg-[var(--color-primary)] text-black hover:bg-neutral-200'
+                              : 'bg-white text-neutral-800 hover:bg-[var(--color-primary)] hover:text-black'
+                          }`}
+                          title={art.featured || art.pinned ? "Click to unpin from homepage" : "Click to pin as featured article on homepage"}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>
+                            {togglingFeaturedSlug === art.slug
+                              ? 'SAVING...'
+                              : (art.featured || art.pinned ? 'UNPIN' : 'PIN TO HOME')}
+                          </span>
+                        </button>
                         <button
                           onClick={() => handleEditArticle(art)}
                           className="px-3 py-1.5 bg-white border-2 border-black font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] transition-colors flex items-center space-x-1"
@@ -1252,92 +1543,329 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
             {activeTab === 'carousel' && (
               <div className="p-6 max-h-[70vh] overflow-y-auto space-y-8 bg-neutral-50">
                 <div>
-                  <h2 className="font-display font-black text-2xl uppercase tracking-tight mb-2">Featured Carousel Slides</h2>
-                  <p className="font-sans text-sm text-neutral-600 mb-6">Manage the auto-sliding promotional banners shown on the home page. Synced globally to Firestore.</p>
+                  <div className="flex items-center justify-between mb-2">
+                    <h2 className="font-display font-black text-2xl uppercase tracking-tight">Featured Carousel Slides</h2>
+                    <button
+                      onClick={loadCarousel}
+                      className="px-3 py-1.5 bg-white border-2 border-black neo-shadow-sm hover:bg-neutral-100 font-mono text-xs font-bold flex items-center space-x-1"
+                      title="Reload from Firestore"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCarousel ? 'animate-spin' : ''}`} />
+                      <span>SYNC</span>
+                    </button>
+                  </div>
+                  <p className="font-sans text-sm text-neutral-600 mb-4">
+                    Manage the auto-sliding promotional banners displayed on the home page. Any edits or deletions reflect directly to the cloud backend and update in real-time.
+                  </p>
 
-                  <div className="bg-white border-2 border-black p-4 shadow-[4px_4px_0_0_#000] mb-8 space-y-4">
-                    <h3 className="font-mono text-sm font-bold uppercase mb-2">Add New Slide</h3>
-                    
-                    <div>
-                      <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Title</label>
-                      <input 
-                        type="text" 
-                        value={newSlideTitle}
-                        onChange={(e) => setNewSlideTitle(e.target.value)}
-                        placeholder="e.g. Distributed Systems Masterclass"
-                        className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Image (Upload or URL)</label>
-                      <div className="flex gap-2">
-                        <input 
-                          type="url" 
-                          value={newSlideImageUrl}
-                          onChange={(e) => setNewSlideImageUrl(e.target.value)}
-                          placeholder="https://images.unsplash.com/..."
-                          className="flex-1 px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                        />
-                        <label className="cursor-pointer px-4 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors flex items-center space-x-1">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>{isUploadingSlideImage ? 'UPLOADING...' : 'UPLOAD'}</span>
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            onChange={handleSlideUpload} 
-                            className="hidden" 
-                            disabled={isUploadingSlideImage}
-                          />
-                        </label>
+                  {carouselActionMessage && (
+                    <div className="mb-6 p-3 bg-[var(--color-primary)] border-2 border-black neo-shadow-sm font-mono text-xs font-bold flex items-center justify-between animate-fadeIn">
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-black stroke-[3]" />
+                        <span>{carouselActionMessage}</span>
                       </div>
+                      <button 
+                        onClick={() => setCarouselActionMessage(null)}
+                        className="p-1 hover:bg-black/10 rounded"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
                     </div>
+                  )}
 
-                    <div>
-                      <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
-                      <input 
-                        type="url" 
-                        value={newSlideLinkUrl}
-                        onChange={(e) => setNewSlideLinkUrl(e.target.value)}
-                        placeholder="https://example.com/promo"
-                        className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
-                      />
+                  {/* Add New Slide Card */}
+                  <div className="bg-white border-2 border-black p-5 shadow-[4px_4px_0_0_#000] mb-8 space-y-4">
+                    <div className="flex items-center space-x-2 border-b-2 border-black pb-2">
+                      <PlusCircle className="w-4 h-4 text-black" />
+                      <h3 className="font-display font-black text-base uppercase">Add New Promotional Slide</h3>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="md:col-span-2 space-y-4">
+                        <div>
+                          <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Headline / Title</label>
+                          <input 
+                            type="text" 
+                            value={newSlideTitle}
+                            onChange={(e) => setNewSlideTitle(e.target.value)}
+                            placeholder="e.g. Distributed Systems Masterclass &amp; Architecture Deep-Dive"
+                            className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-mono text-xs font-bold uppercase block mb-1">Slide Image (Upload or Direct URL)</label>
+                          <div className="flex gap-2">
+                            <input 
+                              type="url" 
+                              value={newSlideImageUrl}
+                              onChange={(e) => setNewSlideImageUrl(e.target.value)}
+                              placeholder="https://images.unsplash.com/... or upload"
+                              className="flex-1 px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                            />
+                            <label className="cursor-pointer px-4 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors flex items-center space-x-1.5 shrink-0">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>{isUploadingSlideImage ? 'UPLOADING...' : 'UPLOAD FILE'}</span>
+                              <input 
+                                type="file" 
+                                accept="image/*" 
+                                onChange={handleSlideUpload} 
+                                className="hidden" 
+                                disabled={isUploadingSlideImage}
+                              />
+                            </label>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
+                          <input 
+                            type="text" 
+                            value={newSlideLinkUrl}
+                            onChange={(e) => setNewSlideLinkUrl(e.target.value)}
+                            placeholder="https://example.com or internal link"
+                            className="w-full px-3 py-2 border-2 border-neutral-300 focus:border-black font-sans text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Live Thumbnail Preview */}
+                      <div className="flex flex-col items-center justify-center border-2 border-dashed border-neutral-300 p-3 bg-neutral-50 min-h-[140px]">
+                        <span className="font-mono text-[10px] uppercase font-bold text-neutral-500 mb-2">Live Slide Preview</span>
+                        {newSlideImageUrl ? (
+                          <img 
+                            src={newSlideImageUrl} 
+                            alt="Slide preview" 
+                            className="w-full aspect-[21/9] object-cover border-2 border-black bg-neutral-200" 
+                          />
+                        ) : (
+                          <div className="text-center text-neutral-400 font-mono text-xs">
+                            No image selected yet
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <button
                       onClick={handleAddSlide}
-                      className="px-6 py-2.5 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+                      className="px-6 py-2.5 bg-black text-[var(--color-primary)] font-mono text-xs font-bold uppercase border-2 border-black neo-shadow-sm hover:bg-[var(--color-primary)] hover:text-black active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center space-x-2"
                     >
-                      Add Slide to Firestore
+                      <PlusCircle className="w-4 h-4" />
+                      <span>Save &amp; Add Slide to Firestore</span>
                     </button>
                   </div>
 
-                  {isLoadingCarousel ? (
-                    <div className="py-12 flex justify-center"><RefreshCw className="w-8 h-8 animate-spin" /></div>
-                  ) : carouselSlides.length === 0 ? (
-                    <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500">
-                      No carousel slides found in Firestore. Add one above.
+                  {/* Existing Slides List */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-neutral-500">
+                        Active Carousel Slides ({carouselSlides.length})
+                      </h3>
+                      <span className="font-mono text-[10px] text-neutral-400">
+                        Drag or use arrows to reorder
+                      </span>
                     </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {carouselSlides.map((slide, index) => (
-                        <div key={slide.id} className="flex items-center gap-4 bg-white border-2 border-black p-3">
-                          <div className="flex flex-col gap-1">
-                            <button onClick={() => handleMoveSlide(index, -1)} disabled={index === 0} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowUp className="w-4 h-4" /></button>
-                            <button onClick={() => handleMoveSlide(index, 1)} disabled={index === carouselSlides.length - 1} className="p-1 hover:bg-neutral-200 disabled:opacity-30"><ArrowDown className="w-4 h-4" /></button>
-                          </div>
-                          <img src={slide.imageUrl} alt={slide.title} className="w-24 h-16 object-cover border-2 border-black bg-neutral-100" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-display font-bold text-sm truncate">{slide.title || 'Untitled Slide'}</div>
-                            <div className="font-mono text-xs text-neutral-500 truncate">{slide.linkUrl}</div>
-                          </div>
-                          <button onClick={() => handleDeleteSlide(slide.id)} className="p-2 text-red-600 hover:bg-red-50">
-                            <Trash2 className="w-5 h-5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+
+                    {isLoadingCarousel ? (
+                      <div className="py-12 flex flex-col items-center justify-center space-y-2">
+                        <RefreshCw className="w-8 h-8 animate-spin text-black" />
+                        <span className="font-mono text-xs text-neutral-500">Syncing with Firestore...</span>
+                      </div>
+                    ) : carouselSlides.length === 0 ? (
+                      <div className="p-8 border-2 border-dashed border-neutral-300 text-center font-mono text-sm text-neutral-500 bg-white">
+                        No carousel slides found in Firestore. Add your first promotional slide above.
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {carouselSlides.map((slide, index) => {
+                          const isEditing = editingSlideId === slide.id;
+
+                          if (isEditing) {
+                            return (
+                              <div 
+                                key={slide.id} 
+                                className="bg-white border-3 border-black p-5 shadow-[6px_6px_0_0_#000] space-y-4 animate-fadeIn"
+                              >
+                                <div className="flex items-center justify-between border-b-2 border-black pb-2 bg-neutral-100 -m-5 mb-3 p-3">
+                                  <div className="flex items-center space-x-2">
+                                    <Edit2 className="w-4 h-4 text-black" />
+                                    <span className="font-display font-black text-sm uppercase">Editing Slide #{index + 1}</span>
+                                  </div>
+                                  <button
+                                    onClick={handleCancelEditSlide}
+                                    className="p-1 hover:bg-neutral-200 border border-black text-black"
+                                    title="Cancel editing"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                  <div className="md:col-span-2 space-y-3">
+                                    <div>
+                                      <label className="font-mono text-xs font-bold uppercase block mb-1">Headline / Title</label>
+                                      <input 
+                                        type="text" 
+                                        value={editSlideTitle}
+                                        onChange={(e) => setEditSlideTitle(e.target.value)}
+                                        placeholder="Slide title"
+                                        className="w-full px-3 py-2 border-2 border-black font-sans text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="font-mono text-xs font-bold uppercase block mb-1">Image URL / Upload</label>
+                                      <div className="flex gap-2">
+                                        <input 
+                                          type="url" 
+                                          value={editSlideImageUrl}
+                                          onChange={(e) => setEditSlideImageUrl(e.target.value)}
+                                          placeholder="https://..."
+                                          className="flex-1 px-3 py-2 border-2 border-black font-sans text-sm"
+                                        />
+                                        <label className="cursor-pointer px-3 py-2 bg-black text-white font-mono text-xs font-bold uppercase hover:bg-[var(--color-primary)] hover:text-black transition-colors flex items-center space-x-1 shrink-0">
+                                          <Upload className="w-3.5 h-3.5" />
+                                          <span>{isUploadingEditSlideImage ? 'UPLOADING...' : 'REPLACE FILE'}</span>
+                                          <input 
+                                            type="file" 
+                                            accept="image/*" 
+                                            onChange={handleEditSlideUpload} 
+                                            className="hidden" 
+                                            disabled={isUploadingEditSlideImage}
+                                          />
+                                        </label>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <label className="font-mono text-xs font-bold uppercase block mb-1">Target Link URL</label>
+                                      <input 
+                                        type="text" 
+                                        value={editSlideLinkUrl}
+                                        onChange={(e) => setEditSlideLinkUrl(e.target.value)}
+                                        placeholder="https://..."
+                                        className="w-full px-3 py-2 border-2 border-black font-sans text-sm"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Preview */}
+                                  <div className="flex flex-col items-center justify-center border-2 border-black p-2 bg-neutral-100">
+                                    <span className="font-mono text-[10px] uppercase font-bold text-neutral-600 mb-2">Updated Preview</span>
+                                    {editSlideImageUrl ? (
+                                      <img 
+                                        src={editSlideImageUrl} 
+                                        alt="Edit preview" 
+                                        className="w-full aspect-[21/9] object-cover border-2 border-black bg-white" 
+                                      />
+                                    ) : (
+                                      <div className="text-neutral-400 font-mono text-xs">No image</div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center space-x-3 pt-2 border-t-2 border-neutral-200">
+                                  <button
+                                    onClick={() => handleSaveEditSlide(slide.id)}
+                                    disabled={isSavingSlide}
+                                    className="px-5 py-2 bg-black text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-black font-mono text-xs font-bold uppercase border-2 border-black neo-shadow-sm active:translate-x-0.5 active:translate-y-0.5 transition-all flex items-center space-x-1.5"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    <span>{isSavingSlide ? 'SAVING TO FIRESTORE...' : 'SAVE CHANGES'}</span>
+                                  </button>
+                                  <button
+                                    onClick={handleCancelEditSlide}
+                                    className="px-4 py-2 bg-white text-black hover:bg-neutral-100 font-mono text-xs font-bold uppercase border-2 border-black transition-colors"
+                                  >
+                                    CANCEL
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div 
+                              key={slide.id} 
+                              className="flex flex-col sm:flex-row sm:items-center gap-4 bg-white border-2 border-black p-3.5 neo-shadow-sm hover:border-black transition-all"
+                            >
+                              {/* Order Reordering Controls */}
+                              <div className="flex sm:flex-col gap-1 shrink-0">
+                                <button 
+                                  onClick={() => handleMoveSlide(index, -1)} 
+                                  disabled={index === 0} 
+                                  className="p-1.5 border border-black hover:bg-neutral-100 disabled:opacity-20 transition-colors"
+                                  title="Move Up"
+                                >
+                                  <ArrowUp className="w-3.5 h-3.5" />
+                                </button>
+                                <button 
+                                  onClick={() => handleMoveSlide(index, 1)} 
+                                  disabled={index === carouselSlides.length - 1} 
+                                  className="p-1.5 border border-black hover:bg-neutral-100 disabled:opacity-20 transition-colors"
+                                  title="Move Down"
+                                >
+                                  <ArrowDown className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* Index Badge & Slide Thumbnail */}
+                              <div className="relative shrink-0">
+                                <span className="absolute top-1 left-1 bg-black text-white px-1.5 py-0.2 font-mono text-[9px] font-bold border border-black z-10">
+                                  #{index + 1}
+                                </span>
+                                <img 
+                                  src={slide.imageUrl} 
+                                  alt={slide.title || 'Slide'} 
+                                  className="w-32 sm:w-36 h-20 sm:h-20 object-cover border-2 border-black bg-neutral-100" 
+                                />
+                              </div>
+
+                              {/* Slide Details */}
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-display font-black text-base text-black truncate mb-1">
+                                  {slide.title || <span className="text-neutral-400 italic">Untitled Slide</span>}
+                                </h4>
+                                {slide.linkUrl ? (
+                                  <a 
+                                    href={slide.linkUrl} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="font-mono text-xs text-neutral-600 hover:text-black flex items-center space-x-1 truncate underline"
+                                  >
+                                    <span className="truncate">{slide.linkUrl}</span>
+                                    <ExternalLink className="w-3 h-3 shrink-0" />
+                                  </a>
+                                ) : (
+                                  <span className="font-mono text-xs text-neutral-400">No destination link</span>
+                                )}
+                              </div>
+
+                              {/* Action Buttons: EDIT & DELETE */}
+                              <div className="flex items-center space-x-2 shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0">
+                                <button 
+                                  onClick={() => handleStartEditSlide(slide)} 
+                                  className="px-3 py-1.5 bg-white hover:bg-[var(--color-primary)] text-black border-2 border-black neo-shadow-sm font-mono text-xs font-bold uppercase flex items-center space-x-1.5 active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                  title="Edit slide contents"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                  <span>EDIT</span>
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteSlide(slide.id)} 
+                                  className="px-3 py-1.5 bg-white hover:bg-red-600 text-black hover:text-white border-2 border-black neo-shadow-sm font-mono text-xs font-bold uppercase flex items-center space-x-1.5 active:translate-x-0.5 active:translate-y-0.5 transition-all"
+                                  title="Delete slide from Firestore"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>DELETE</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

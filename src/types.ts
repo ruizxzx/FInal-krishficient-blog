@@ -38,6 +38,7 @@ export interface Article {
   publishedAt: string;
   readingTimeMinutes: number;
   featured?: boolean;
+  pinned?: boolean;
   trending?: boolean;
   author: {
     name: string;

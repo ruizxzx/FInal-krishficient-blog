@@ -61,20 +61,41 @@ const CarouselComponent: React.FC<{ slides: CarouselSlide[] }> = ({ slides }) =>
     setProgress(0);
   };
 
+  const hasLink = Boolean(currentSlide.linkUrl && currentSlide.linkUrl.trim() !== '');
+  const isExternal = hasLink && (currentSlide.linkUrl.startsWith('http://') || currentSlide.linkUrl.startsWith('https://'));
+
+  const SlideWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    if (!hasLink) {
+      return <div className="block w-full h-full relative">{children}</div>;
+    }
+    return (
+      <a 
+        href={currentSlide.linkUrl} 
+        target={isExternal ? "_blank" : undefined} 
+        rel={isExternal ? "noopener noreferrer" : undefined} 
+        className="block w-full h-full relative cursor-pointer"
+      >
+        {children}
+      </a>
+    );
+  };
+
   return (
     <div className="w-full bg-black border-b-4 border-black p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto">
         <div className="relative w-full aspect-[21/9] sm:aspect-[3/1] neo-border bg-white overflow-hidden group">
-          <a href={currentSlide.linkUrl} target="_blank" rel="noopener noreferrer" className="block w-full h-full relative cursor-pointer">
+          <SlideWrapper>
             <img 
               src={currentSlide.imageUrl} 
-              alt={currentSlide.title} 
+              alt={currentSlide.title || 'Slide'} 
               className="w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6 sm:p-10">
-              <h2 className="text-white font-display font-black text-2xl sm:text-4xl uppercase max-w-2xl">{currentSlide.title}</h2>
-            </div>
-          </a>
+            {currentSlide.title && (
+              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex flex-col justify-end p-6 sm:p-10">
+                <h2 className="text-white font-display font-black text-2xl sm:text-4xl uppercase max-w-2xl">{currentSlide.title}</h2>
+              </div>
+            )}
+          </SlideWrapper>
           
           {slides.length > 1 && (
             <>
@@ -143,7 +164,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     };
   }, []);
 
-  const featuredArticle = articles.find((a) => a.featured) || articles[0];
+  const featuredArticle = articles.find((a) => a.pinned) || articles.find((a) => a.featured) || articles[0];
   const latestArticles = articles.filter((a) => a.id !== featuredArticle?.id).slice(0, 5);
 
   const topicSpotlights: { title: Category; desc: string; color: string; count: number }[] = [
@@ -202,8 +223,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <div className="w-full lg:w-2/3 lg:border-r-4 border-black p-6 sm:p-10 flex flex-col justify-between">
               <div>
                 <div className="flex items-center gap-3 sm:gap-4 mb-4 flex-wrap">
-                  <span className="bg-[var(--color-primary)] neo-border px-3 py-1 text-xs font-black uppercase text-black">
-                    Featured
+                  <span className="bg-[var(--color-primary)] neo-border px-3 py-1 text-xs font-black uppercase text-black flex items-center space-x-1">
+                    <Sparkles className="w-3.5 h-3.5 fill-black text-black" />
+                    <span>{featuredArticle.pinned ? 'PINNED ESSAY' : 'FEATURED ESSAY'}</span>
                   </span>
                   <span className="text-xs font-mono font-bold uppercase tracking-wider text-neutral-600">
                     {featuredArticle.category} • {featuredArticle.readingTimeMinutes} Min Read

@@ -245,6 +245,71 @@ export async function saveArticle(article: Article): Promise<Article> {
   return article;
 }
 
+export async function setArticleFeaturedStatus(
+  article: Article, 
+  isFeatured: boolean, 
+  isPinned?: boolean
+): Promise<void> {
+  if (!article.slug) return;
+  const articleDocRef = doc(db, 'articles', article.slug);
+  const dataToSave = {
+    ...article,
+    featured: isFeatured,
+    pinned: isPinned !== undefined ? isPinned : isFeatured,
+    updatedAt: serverTimestamp(),
+  };
+  await setDoc(articleDocRef, dataToSave, { merge: true });
+}
+
+export async function syncAuthorToAllCloudArticles(author: {
+  name: string;
+  role: string;
+  avatar: string;
+  bio?: string;
+}): Promise<number> {
+  const articlesRef = collection(db, 'articles');
+  const snap = await getDocs(articlesRef);
+  let updatedCount = 0;
+  
+  // Update all cloud articles in Firestore
+  for (const docSnap of snap.docs) {
+    const existing = docSnap.data();
+    await setDoc(docSnap.ref, {
+      ...existing,
+      author: {
+        name: author.name || 'Krish',
+        role: author.role || 'Founder & Systems Architect',
+        avatar: author.avatar || '',
+        bio: author.bio || existing.author?.bio || ''
+      },
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    updatedCount++;
+  }
+
+  // Also, if Firestore had fewer articles than INITIAL_ARTICLES, seed any missing with the new author info
+  for (const initArt of INITIAL_ARTICLES) {
+    const docRef = doc(db, 'articles', initArt.slug);
+    const existingDoc = await getDoc(docRef);
+    if (!existingDoc.exists()) {
+      await setDoc(docRef, {
+        ...initArt,
+        author: {
+          name: author.name || 'Krish',
+          role: author.role || 'Founder & Systems Architect',
+          avatar: author.avatar || '',
+          bio: author.bio || initArt.author?.bio || ''
+        },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      updatedCount++;
+    }
+  }
+
+  return updatedCount;
+}
+
 export async function deleteArticle(slug: string): Promise<void> {
   if (!slug) return;
   await deleteDoc(doc(db, 'articles', slug));

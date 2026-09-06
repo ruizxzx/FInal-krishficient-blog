@@ -460,22 +460,21 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
         <div className="p-8 bg-gray-50 neo-border neo-shadow">
           <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-6">
             <img
-              src={article.author.avatar}
-              alt={article.author.name}
-              className="w-20 h-20 neo-border object-cover shrink-0"
+              src={siteConfig?.authorAvatarUrl || article.author.avatar}
+              alt={siteConfig?.authorName || article.author.name}
+              className="w-20 h-20 neo-border object-cover shrink-0 bg-white"
             />
             <div className="space-y-2">
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                 <h4 className="font-display font-black text-2xl text-black uppercase">
-                  WRITTEN BY {article.author.name}
+                  WRITTEN BY {siteConfig?.authorName || article.author.name}
                 </h4>
-                <span className="font-mono text-[10px] font-bold bg-[var(--color-primary)] text-black px-2 py-0.5 border-2 border-black">
-                  FOUNDER
+                <span className="font-mono text-[10px] font-bold bg-[var(--color-primary)] text-black px-2 py-0.5 border-2 border-black uppercase">
+                  {siteConfig?.authorRole || 'FOUNDER'}
                 </span>
               </div>
               <p className="font-sans text-neutral-700 text-sm leading-relaxed">
-                {article.author.bio} Dedicated to demystifying high-scale software engineering,
-                cutting through hype, and sharing reproducible architectural blueprints.
+                {siteConfig?.aboutMeBio || article.author.bio || "Dedicated to demystifying high-scale software engineering, cutting through hype, and sharing reproducible architectural blueprints."}
               </p>
             </div>
           </div>
@@ -506,6 +505,7 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
                   article={rel}
                   onSelect={onSelectArticle}
                   variant="compact"
+                  siteConfig={siteConfig}
                 />
               ))}
             </div>

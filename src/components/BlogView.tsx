@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Article, Category } from '../types';
+import { Article, Category, SiteConfig } from '../types';
 import { CATEGORIES } from '../data/articles';
 import { ArticleCard } from './ArticleCard';
 import { Search, Filter, Bookmark, Sparkles, BookOpen, Layers, ArrowUpDown } from 'lucide-react';
@@ -11,6 +11,7 @@ interface BlogViewProps {
   onToggleSave: (slug: string) => void;
   selectedCategory: string;
   onSelectCategory: (cat: string) => void;
+  siteConfig: SiteConfig;
 }
 
 export const BlogView: React.FC<BlogViewProps> = ({
@@ -20,6 +21,7 @@ export const BlogView: React.FC<BlogViewProps> = ({
   onToggleSave,
   selectedCategory,
   onSelectCategory,
+  siteConfig,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -76,7 +78,7 @@ export const BlogView: React.FC<BlogViewProps> = ({
 
   // Determine top featured article
   const featuredArticle = useMemo(() => {
-    return articles.find((a) => a.featured) || articles[0];
+    return articles.find((a) => a.pinned) || articles.find((a) => a.featured) || articles[0];
   }, [articles]);
 
   return (
@@ -119,6 +121,7 @@ export const BlogView: React.FC<BlogViewProps> = ({
               isSaved={savedSlugs.includes(featuredArticle.slug)}
               onToggleSave={onToggleSave}
               variant="featured"
+              siteConfig={siteConfig}
             />
           </div>
         )}
@@ -280,6 +283,7 @@ export const BlogView: React.FC<BlogViewProps> = ({
                 isSaved={savedSlugs.includes(art.slug)}
                 onToggleSave={onToggleSave}
                 variant="standard"
+                siteConfig={siteConfig}
               />
             ))}
           </div>
