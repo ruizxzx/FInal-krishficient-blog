@@ -1,10 +1,4 @@
-export type Category = 
-  | 'Web Development'
-  | 'Artificial Intelligence'
-  | 'Software Engineering'
-  | 'Computer Science'
-  | 'Developer Tools'
-  | 'System Design';
+export type Category = string;
 
 export interface CodeSnippet {
   language: string;

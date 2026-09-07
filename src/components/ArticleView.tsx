@@ -318,6 +318,23 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
               );
             }
 
+            if (block.type === 'image') {
+              return (
+                <figure key={index} className="my-8 neo-border neo-shadow-sm overflow-hidden bg-neutral-900">
+                  <img
+                    src={block.imageUrl}
+                    alt={block.imageAlt || 'Article image'}
+                    className="w-full h-auto max-h-[600px] object-cover"
+                  />
+                  {block.imageCaption && (
+                    <figcaption className="p-3 bg-neutral-100 border-t-2 border-black font-mono text-xs text-neutral-700 italic text-center">
+                      {block.imageCaption}
+                    </figcaption>
+                  )}
+                </figure>
+              );
+            }
+
             if (block.type === 'callout') {
               const bg = 
                 block.calloutType === 'warning' ? 'bg-[var(--color-accent)]' :

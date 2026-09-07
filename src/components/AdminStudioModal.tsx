@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Article, Category, SiteConfig, BentoLink, CarouselSlide } from '../types';
+import { Article, Category, SiteConfig, BentoLink, CarouselSlide, ArticleContentBlock, CodeSnippet } from '../types';
+import { ImageCropper } from './ImageCropper';
+import { ContentBlockEditor } from './ContentBlockEditor';
 import { 
   X, 
   PlusCircle, 
@@ -107,7 +109,10 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'settings' | 'create' | 'manage' | 'links' | 'carousel'>('settings');
 
-  // Carousel State
+  const existingCategories = Array.from(new Set(articles.map(a => a.category).filter(Boolean)));
+  // ensure defaults exist
+  const defaultCategories = ['Web Development', 'Artificial Intelligence', 'Software Engineering', 'Computer Science', 'Developer Tools', 'System Design'];
+  const allCategories = Array.from(new Set([...defaultCategories, ...existingCategories]));
   const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
   const [isLoadingCarousel, setIsLoadingCarousel] = useState(false);
   const [newSlideTitle, setNewSlideTitle] = useState('');
@@ -441,22 +446,23 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
   const [newTitle, setNewTitle] = useState('');
   const [newCategory, setNewCategory] = useState<Category>('Web Development');
+  const [customCategory, setCustomCategory] = useState('');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [newTags, setNewTags] = useState('React, Architecture, Frontend');
   const [newExcerpt, setNewExcerpt] = useState('');
   const [newCoverImage, setNewCoverImage] = useState('https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop');
   const [newCoverAlt, setNewCoverAlt] = useState('Code and architecture display');
   const [newCoverCaption, setNewCoverCaption] = useState('Fig 1 — Production systems blueprint.');
   const [newReadingTime, setNewReadingTime] = useState(6);
-  const [newParagraph1, setNewParagraph1] = useState('');
-  const [newCodeLanguage, setNewCodeLanguage] = useState('typescript');
-  const [newCodeSnippet, setNewCodeSnippet] = useState('');
-  const [newTakeaway, setNewTakeaway] = useState('');
+  const [contentBlocks, setContentBlocks] = useState<ArticleContentBlock[]>([]);
   const [newIsFeatured, setNewIsFeatured] = useState(false);
   const [newIsPinned, setNewIsPinned] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [publishSuccess, setPublishSuccess] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isUploadingCover, setIsUploadingCover] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [cropTarget, setCropTarget] = useState<'cover' | number | null>(null); // 'cover' or block index
 
   // Author avatar upload & cloud sync state
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
@@ -613,7 +619,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
         slug,
         title: newTitle.trim(),
         excerpt: newExcerpt.trim(),
-        category: newCategory,
+        category: isCustomCategory ? customCategory : newCategory,
         tags: tagsArray.length ? tagsArray : ['Engineering'],
         publishedAt: editingPublishedAt || new Date().toISOString().split('T')[0],
         readingTimeMinutes: Number(newReadingTime) || 5,
@@ -631,24 +637,7 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
           avatar: authorAvatarUrl || siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
           bio: manifestoText || aboutMeBio || siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.'
         },
-        content: [
-          {
-            type: 'paragraph',
-            content: newParagraph1 || newExcerpt
-          },
-          ...(newCodeSnippet ? [{
-            type: 'code' as const,
-            codeBlock: {
-              language: newCodeLanguage,
-              filename: `solution.${newCodeLanguage === 'typescript' ? 'ts' : newCodeLanguage === 'python' ? 'py' : 'txt'}`,
-              code: newCodeSnippet
-            }
-          }] : []),
-          ...(newTakeaway ? [{
-            type: 'takeaways' as const,
-            items: [newTakeaway]
-          }] : [])
-        ]
+        content: contentBlocks.length > 0 ? contentBlocks : [{ type: 'paragraph', content: newExcerpt }]
       };
 
       await saveArticle(article);
@@ -672,22 +661,24 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setEditingArticleSlug(article.slug);
     setEditingPublishedAt(article.publishedAt);
     setNewTitle(article.title);
-    setNewCategory(article.category);
+    
+    if (defaultCategories.includes(article.category)) {
+      setNewCategory(article.category);
+      setIsCustomCategory(false);
+      setCustomCategory('');
+    } else {
+      setNewCategory('custom');
+      setIsCustomCategory(true);
+      setCustomCategory(article.category);
+    }
+    
     setNewTags(article.tags?.join(', ') || '');
     setNewExcerpt(article.excerpt);
     setNewCoverImage(article.coverImage || '');
     setNewCoverAlt(article.coverImageAlt || '');
     setNewCoverCaption(article.coverImageCaption || '');
     setNewReadingTime(article.readingTimeMinutes);
-    
-    const p1 = article.content?.find(c => c.type === 'paragraph');
-    const code = article.content?.find(c => c.type === 'code');
-    const takeaways = article.content?.find(c => c.type === 'takeaways');
-
-    setNewParagraph1(p1?.content || '');
-    setNewCodeSnippet(code?.codeBlock?.code || '');
-    setNewCodeLanguage(code?.codeBlock?.language || 'typescript');
-    setNewTakeaway(takeaways?.items?.[0] || '');
+    setContentBlocks(article.content || []);
     setNewIsFeatured(!!article.featured || !!article.pinned);
     setNewIsPinned(!!article.pinned || !!article.featured);
   };
@@ -709,11 +700,11 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
     setEditingPublishedAt(null);
     setNewTitle('');
     setNewCategory('Web Development');
+    setIsCustomCategory(false);
+    setCustomCategory('');
     setNewTags('');
     setNewExcerpt('');
-    setNewParagraph1('');
-    setNewCodeSnippet('');
-    setNewTakeaway('');
+    setContentBlocks([]);
     setNewIsFeatured(false);
     setNewIsPinned(false);
     setNewCoverImage('https://images.unsplash.com/photo-1555066931-4365d14bab8c?q=80&w=1200&auto=format&fit=crop');
@@ -721,18 +712,68 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
   };
 
   // Image Upload Handlers
-  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setIsUploadingCover(true);
-    try {
-      const url = await uploadImageToStorage(file, 'covers');
-      setNewCoverImage(url);
-    } catch (err: any) {
-      console.error("Cover upload failed:", err);
-      alert("Failed to upload image to Firebase Storage: " + (err.message || "Error"));
-    } finally {
-      setIsUploadingCover(false);
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropImageSrc(reader.result as string);
+      setCropTarget('cover');
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleBlockImageUpload = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropImageSrc(reader.result as string);
+      setCropTarget(index);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleCropCancel = () => {
+    setCropImageSrc(null);
+    setCropTarget(null);
+  };
+
+  const handleCropDone = async (croppedBlob: Blob) => {
+    setCropImageSrc(null);
+    const target = cropTarget;
+    setCropTarget(null);
+
+    const file = new File([croppedBlob], `cropped-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    if (target === 'cover') {
+      setIsUploadingCover(true);
+      try {
+        const url = await uploadImageToStorage(file, 'covers');
+        setNewCoverImage(url);
+      } catch (err: any) {
+        console.error("Cover upload failed:", err);
+        alert("Failed to upload cropped image: " + (err.message || "Error"));
+      } finally {
+        setIsUploadingCover(false);
+      }
+    } else if (typeof target === 'number') {
+      // It's a block index
+      setIsUploadingCover(true); // Reuse loading state for simplicity or create a new one
+      try {
+        const url = await uploadImageToStorage(file, 'articles');
+        const newBlocks = [...contentBlocks];
+        if (newBlocks[target]) {
+          newBlocks[target].imageUrl = url;
+          setContentBlocks(newBlocks);
+        }
+      } catch (err: any) {
+        console.error("Image upload failed:", err);
+        alert("Failed to upload image: " + (err.message || "Error"));
+      } finally {
+        setIsUploadingCover(false);
+      }
     }
   };
 
@@ -755,6 +796,14 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
 
   return (
     <div className="w-full bg-neutral-100 min-h-[calc(100vh-64px)] py-8 sm:py-12 px-4 sm:px-6 lg:px-8 flex justify-center items-start">
+      {cropImageSrc && (
+        <ImageCropper
+          imageSrc={cropImageSrc}
+          onCropDone={handleCropDone}
+          onCancel={handleCropCancel}
+          aspectRatio={cropTarget === 'cover' ? 16 / 9 : undefined}
+        />
+      )}
       <div className="w-full max-w-5xl bg-white border-4 border-black neo-shadow-lg overflow-hidden my-4 sm:my-8">
         
         {/* Modal Header */}
@@ -1186,17 +1235,33 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                           Category *
                         </label>
                         <select
-                          value={newCategory}
-                          onChange={(e) => setNewCategory(e.target.value as Category)}
+                          value={isCustomCategory ? 'custom' : newCategory}
+                          onChange={(e) => {
+                            if (e.target.value === 'custom') {
+                              setIsCustomCategory(true);
+                              setNewCategory('custom');
+                            } else {
+                              setIsCustomCategory(false);
+                              setNewCategory(e.target.value);
+                            }
+                          }}
                           className="w-full px-3.5 py-2.5 border-2 border-black font-sans font-bold text-sm bg-white"
                         >
-                          <option value="Web Development">Web Development</option>
-                          <option value="Artificial Intelligence">Artificial Intelligence</option>
-                          <option value="Software Engineering">Software Engineering</option>
-                          <option value="Computer Science">Computer Science</option>
-                          <option value="Developer Tools">Developer Tools</option>
-                          <option value="System Design">System Design</option>
+                          {allCategories.map(cat => (
+                            <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                          <option value="custom">+ Add Custom Category...</option>
                         </select>
+                        {isCustomCategory && (
+                          <input
+                            type="text"
+                            value={customCategory}
+                            onChange={(e) => setCustomCategory(e.target.value)}
+                            placeholder="Enter new category name"
+                            className="w-full mt-2 px-3.5 py-2.5 border-2 border-black font-sans font-bold text-sm bg-neutral-50"
+                            required
+                          />
+                        )}
                       </div>
 
                       <div className="space-y-1">
@@ -1278,58 +1343,11 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
                       )}
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="font-mono text-xs font-bold uppercase text-black">
-                        Article Body (Paragraph 1)
-                      </label>
-                      <textarea
-                        rows={6}
-                        value={newParagraph1}
-                        onChange={(e) => setNewParagraph1(e.target.value)}
-                        placeholder="Detailed technical essay content..."
-                        className="w-full px-3.5 py-2.5 border-2 border-black font-serif text-sm bg-white"
-                      />
-                    </div>
-
-                    <div className="space-y-2 border-2 border-black p-3 bg-neutral-50">
-                      <div className="flex items-center justify-between">
-                        <label className="font-mono text-xs font-bold uppercase text-black">
-                          Optional Code Snippet Block
-                        </label>
-                        <select
-                          value={newCodeLanguage}
-                          onChange={(e) => setNewCodeLanguage(e.target.value)}
-                          className="px-2 py-1 border border-black font-mono text-xs bg-white"
-                        >
-                          <option value="typescript">TypeScript</option>
-                          <option value="javascript">JavaScript</option>
-                          <option value="rust">Rust</option>
-                          <option value="go">Go</option>
-                          <option value="python">Python</option>
-                          <option value="json">JSON</option>
-                        </select>
-                      </div>
-                      <textarea
-                        rows={4}
-                        value={newCodeSnippet}
-                        onChange={(e) => setNewCodeSnippet(e.target.value)}
-                        placeholder="// Enter code here..."
-                        className="w-full px-3 py-2 border-2 border-black font-mono text-xs bg-white"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="font-mono text-xs font-bold uppercase text-black">
-                        Key Engineering Takeaway
-                      </label>
-                      <input
-                        type="text"
-                        value={newTakeaway}
-                        onChange={(e) => setNewTakeaway(e.target.value)}
-                        placeholder="e.g. Decouple bundle generation from runtime execution to achieve zero cold starts."
-                        className="w-full px-3.5 py-2.5 border-2 border-black font-sans text-sm bg-white"
-                      />
-                    </div>
+                    <ContentBlockEditor
+                      blocks={contentBlocks}
+                      onChange={setContentBlocks}
+                      onUploadImage={handleBlockImageUpload}
+                    />
 
                     {/* Homepage Feature / Pin Controls */}
                     <div className="p-4 bg-[var(--color-primary)]/20 border-2 border-black space-y-2">
