@@ -32,6 +32,7 @@ interface HomeViewProps {
   onToggleSave: (slug: string) => void;
   onSelectCategory: (cat: string) => void;
   siteConfig: SiteConfig;
+  userProfile?: import('../types').CommunityUser | null;
 }
 
 const CarouselComponent: React.FC<{ slides: CarouselSlide[] }> = ({ slides }) => {
@@ -140,6 +141,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onToggleSave,
   onSelectCategory,
   siteConfig,
+  userProfile,
 }) => {
   const [featuredCommunityPosts, setFeaturedCommunityPosts] = useState<CommunityPost[]>([]);
   const [carouselSlides, setCarouselSlides] = useState<CarouselSlide[]>([]);
@@ -213,6 +215,31 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* 1.5 Carousel Section */}
       {carouselSlides.length > 0 && <CarouselComponent slides={carouselSlides} />}
+
+      {/* 1.7 Continue Reading Banner */}
+      {userProfile?.lastRead && (
+        <section className="border-b-4 border-black bg-white">
+          <div className="max-w-7xl mx-auto flex items-center justify-between p-4 sm:p-6 bg-neutral-100 neo-border-t neo-border-b">
+            <div className="flex items-center space-x-3">
+              <BookOpen className="w-6 h-6 text-black" />
+              <div>
+                <p className="font-mono text-xs font-bold text-neutral-500 uppercase tracking-widest">
+                  Continue Reading
+                </p>
+                <h3 className="font-display font-black text-base sm:text-lg text-black line-clamp-1">
+                  {userProfile.lastRead.title}
+                </h3>
+              </div>
+            </div>
+            <button
+              onClick={() => onNavigate(userProfile.lastRead!.itemType === 'article' ? 'article' : 'community_post', userProfile.lastRead!.itemId)}
+              className="hidden sm:flex px-4 py-2 bg-black text-[var(--color-primary)] font-display font-black text-xs uppercase neo-border hover:bg-[var(--color-primary)] hover:text-black transition-colors"
+            >
+              Resume
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* 2. High Density Main Split: 2/3 Featured Column & 1/3 Dispatch Updates / Newsletter */}
       {featuredArticle && (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { CommunityPost, CommunityComment, PageView, CommunityUser } from '../types';
-import { getPost, getComments, addComment, toggleVote, getUserVote, deletePost, deleteComment, getCommunityProfile, updatePost } from '../lib/community';
+import { getPost, getComments, addComment, toggleVote, getUserVote, deletePost, deleteComment, getCommunityProfile, updatePost, updateLastRead } from '../lib/community';
 import { auth, loginWithGoogle, checkIsAdmin } from '../lib/firebase';
 import { ArrowLeft, MessageSquare, Sparkles, Loader2, User, Star, ArrowUp, ArrowDown, Bookmark, Trash } from 'lucide-react';
 import { formatDisplayDate } from '../lib/dateUtils';
@@ -66,6 +66,18 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
     fetchData();
   }, [postId]);
 
+  // Sync Last Read with backend
+  useEffect(() => {
+    if (userAuth && post) {
+      updateLastRead(userAuth.uid, {
+        itemId: post.id,
+        itemType: 'post',
+        title: post.title,
+        timestamp: new Date().toISOString()
+      }).catch(console.error);
+    }
+  }, [userAuth, post?.id, post?.title]);
+
   const handleVote = async (voteType: 'up' | 'down') => {
     if (!userAuth) {
       await loginWithGoogle();
@@ -118,7 +130,8 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
   const handleDeleteComment = async (commentId: string, commentAuthorId: string) => {
     const activeUser = auth.currentUser || userAuth;
     const currentIsAdmin = checkIsAdmin(activeUser?.email);
-    const canDeleteComment = activeUser && (activeUser.uid === commentAuthorId || currentIsAdmin);
+    const isPostAuthor = activeUser && post && activeUser.uid === post.authorId;
+    const canDeleteComment = activeUser && (activeUser.uid === commentAuthorId || currentIsAdmin || isPostAuthor);
     if (!canDeleteComment) {
       alert('You do not have permission to delete this comment.');
       return;
@@ -330,7 +343,7 @@ export const CommunityPostView: React.FC<CommunityPostViewProps> = ({
                   </button>
                   <span className="text-neutral-500 ml-2">{formatDisplayDate(c.createdAt)}</span>
                 </div>
-                {(isAdmin || (userAuth && userAuth.uid === c.authorId)) && (
+                {(isAdmin || (userAuth && userAuth.uid === c.authorId) || (userAuth && post && userAuth.uid === post.authorId)) && (
                   <button onClick={() => handleDeleteComment(c.id, c.authorId)} className="ml-auto text-red-500 hover:text-red-700" title="Delete comment">
                     <Trash className="w-4 h-4" />
                   </button>

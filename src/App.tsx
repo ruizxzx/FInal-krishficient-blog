@@ -28,7 +28,7 @@ import { CommunityProfileView } from './components/CommunityProfileView';
 import { SavedView } from './components/SavedView';
 import { UniqueHandleModal } from './components/UniqueHandleModal';
 import { auth } from './lib/firebase';
-import { getCommunityProfile, getUserSaves, toggleUserSaveInCloud } from './lib/community';
+import { getCommunityProfile, subscribeCommunityProfile, getUserSaves, toggleUserSaveInCloud } from './lib/community';
 import { Loader2 } from 'lucide-react';
 
 const SAVED_SLUGS_KEY = 'krishficient_saved_slugs_v1';
@@ -103,16 +103,21 @@ export default function App() {
 
   // Sync auth state & cloud saved items
   useEffect(() => {
+    let unsubProfile: (() => void) | undefined;
+    
     const unsub = auth.onAuthStateChanged(async (user) => {
       setUserAuth(user);
+      
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = undefined;
+      }
+      
       if (user) {
-        // Load profile
-        try {
-          const prof = await getCommunityProfile(user.uid);
+        // Subscribe to profile for real-time updates (like lastRead)
+        unsubProfile = subscribeCommunityProfile(user.uid, (prof) => {
           setUserProfile(prof);
-        } catch (e) {
-          console.error("Error loading user profile:", e);
-        }
+        });
 
         // Load cloud saves
         try {
@@ -140,7 +145,10 @@ export default function App() {
         setUserProfile(null);
       }
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      if (unsubProfile) unsubProfile();
+    };
   }, []);
 
   // Dynamic theme colors synced to global site configuration
@@ -358,6 +366,7 @@ export default function App() {
                   navigateTo('blog');
                 }}
                 siteConfig={siteConfig}
+                userProfile={userProfile}
               />
             )}
 

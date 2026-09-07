@@ -2,8 +2,18 @@ import { db, auth } from './firebase';
 import { 
   collection, doc, setDoc, getDoc, updateDoc, getDocs, query, where, orderBy, deleteDoc, writeBatch, limit, serverTimestamp, onSnapshot, increment
 } from 'firebase/firestore';
-import { CommunityUser, CommunityPost, CommunityComment, UserSavedItem, CarouselSlide } from '../types';
+import { CommunityUser, CommunityPost, CommunityComment, UserSavedItem, CarouselSlide, LastReadItem } from '../types';
 
+export async function updateLastRead(uid: string, lastRead: LastReadItem) {
+  try {
+    await updateDoc(doc(db, 'users', uid), { 
+      lastRead, 
+      updatedAt: serverTimestamp() 
+    });
+  } catch (error) {
+    console.error("Error updating last read:", error);
+  }
+}
 
 function mapDocDates(data: any) {
   if (!data) return data;
@@ -28,6 +38,17 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+export function subscribeCommunityProfile(uid: string, callback: (profile: CommunityUser | null) => void): () => void {
+  const unsubscribe = onSnapshot(doc(db, 'users', uid), (snap) => {
+    if (snap.exists()) {
+      callback(mapDocDates(snap.data()) as CommunityUser);
+    } else {
+      callback(null);
+    }
+  });
+  return unsubscribe;
 }
 
 export async function getCommunityProfile(uid: string): Promise<CommunityUser | null> {

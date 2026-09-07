@@ -22,7 +22,7 @@ import {
 import { ArticleCard } from './ArticleCard';
 import { CommentsSection } from './CommentsSection';
 import { auth, loginWithGoogle } from '../lib/firebase';
-import { getArticleLikeStatus, toggleArticleLike } from '../lib/community';
+import { getArticleLikeStatus, toggleArticleLike, updateLastRead } from '../lib/community';
 import { useAuthState } from 'react-firebase-hooks/auth';
 
 interface ArticleViewProps {
@@ -75,6 +75,18 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Sync Last Read with backend
+  useEffect(() => {
+    if (user && article) {
+      updateLastRead(user.uid, {
+        itemId: article.slug,
+        itemType: 'article',
+        title: article.title,
+        timestamp: new Date().toISOString()
+      }).catch(console.error);
+    }
+  }, [user, article.slug, article.title]);
 
   const handleCopyCode = (code: string, idx: number) => {
     navigator.clipboard.writeText(code);

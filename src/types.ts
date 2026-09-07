@@ -103,6 +103,13 @@ export interface BentoLink {
 
 export type PageView = 'home' | 'blog' | 'article' | 'about' | 'contact' | 'cms' | 'links' | 'community' | 'community_post' | 'community_profile' | 'saved';
 
+export interface LastReadItem {
+  itemId: string;
+  itemType: 'article' | 'post';
+  title: string;
+  timestamp: string;
+}
+
 export interface CommunityUser {
   uid: string;
   username: string;
@@ -113,6 +120,7 @@ export interface CommunityUser {
   isBlocked?: boolean;
   followersCount?: number;
   followingCount?: number;
+  lastRead?: LastReadItem;
   createdAt: string;
   updatedAt: string;
 }
