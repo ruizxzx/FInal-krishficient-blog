@@ -392,6 +392,7 @@ export default function App() {
                   isSaved={savedSlugs.includes(activeArticle.slug)}
                   onToggleSave={handleToggleSave}
                   siteConfig={siteConfig}
+                  onNavigate={navigateTo}
                 />
               ) : (
                 <div className="max-w-xl mx-auto py-24 px-4 text-center space-y-6">

@@ -39,6 +39,7 @@ export interface Article {
     role: string;
     avatar: string;
     bio: string;
+    uid?: string;
   };
   content: ArticleContentBlock[];
   viewsCount?: number;
@@ -106,6 +107,7 @@ export interface LastReadItem {
 
 export interface CommunityUser {
   uid: string;
+  email?: string;
   username: string;
   displayName: string;
   photoURL: string;

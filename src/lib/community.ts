@@ -80,9 +80,10 @@ export async function getProfileByUsername(username: string): Promise<CommunityU
   }
 }
 
-export async function createCommunityProfile(data: Omit<CommunityUser, 'createdAt' | 'updatedAt' | 'followersCount' | 'followingCount'>) {
+export async function createCommunityProfile(data: Omit<CommunityUser, 'createdAt' | 'updatedAt' | 'followersCount' | 'followingCount' | 'email'>) {
   if (!auth.currentUser) throw new Error("Must be logged in");
   const uid = auth.currentUser.uid;
+  const email = auth.currentUser.email || '';
   const username = data.username.toLowerCase().trim();
   const now = new Date().toISOString(); 
   
@@ -95,9 +96,38 @@ export async function createCommunityProfile(data: Omit<CommunityUser, 'createdA
   const batch = writeBatch(db);
   batch.set(usernameRef, { uid });
 
+  // 1. Find admins to auto-follow
+  const { ADMIN_EMAILS } = await import('./firebase');
+  let adminUids: string[] = [];
+  try {
+    if (ADMIN_EMAILS.length > 0) {
+      const adminQuery = query(collection(db, 'users'), where('email', 'in', ADMIN_EMAILS));
+      const adminSnaps = await getDocs(adminQuery);
+      adminUids = adminSnaps.docs.map(d => d.id).filter(id => id !== uid);
+    }
+  } catch(e) { console.error('Failed to fetch admins for auto-follow', e); }
+
   const userRef = doc(db, 'users', uid);
-  const userData = { ...data, username, followersCount: 0, followingCount: 0, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
+  const userData = { ...data, email, username, followersCount: 0, followingCount: adminUids.length, createdAt: serverTimestamp(), updatedAt: serverTimestamp() };
   batch.set(userRef, userData);
+
+  // Auto-follow logic
+  adminUids.forEach(adminUid => {
+    // Add admin to user's following
+    batch.set(doc(db, 'users', uid, 'following', adminUid), {
+      uid: adminUid,
+      createdAt: serverTimestamp()
+    });
+    // Add user to admin's followers
+    batch.set(doc(db, 'users', adminUid, 'followers', uid), {
+      uid,
+      createdAt: serverTimestamp()
+    });
+    // Increment admin's followersCount
+    batch.update(doc(db, 'users', adminUid), {
+      followersCount: increment(1)
+    });
+  });
 
   try {
     await batch.commit();
@@ -495,7 +525,10 @@ export async function toggleVote(postId: string, userId: string, currentUpvotes:
     if (currentVote === voteType) {
       // Remove vote
       batch.delete(doc(db, 'posts', postId, 'votes', userId));
-      if (voteType === 'up') newUp = Math.max(0, currentUpvotes - 1);
+      if (voteType === 'up') {
+        newUp = Math.max(0, currentUpvotes - 1);
+        batch.delete(doc(db, 'users', userId, 'upvotedPosts', postId));
+      }
       if (voteType === 'down') newDown = Math.max(0, currentDownvotes - 1);
     } else {
       // Add or change vote
@@ -507,9 +540,15 @@ export async function toggleVote(postId: string, userId: string, currentUpvotes:
       });
       if (voteType === 'up') {
         newUp = currentUpvotes + 1;
+        batch.set(doc(db, 'users', userId, 'upvotedPosts', postId), {
+          postId,
+          createdAt: serverTimestamp()
+        });
         if (currentVote === 'down') newDown = Math.max(0, currentDownvotes - 1);
       } else {
         newDown = currentDownvotes + 1;
+        // if changing to downvote, remove from upvotedPosts
+        batch.delete(doc(db, 'users', userId, 'upvotedPosts', postId));
         if (currentVote === 'up') newUp = Math.max(0, currentUpvotes - 1);
       }
     }
@@ -539,6 +578,36 @@ export async function getUserVote(postId: string, userId: string): Promise<'up' 
   } catch (error) {
     handleFirestoreError(error, OperationType.GET, p);
     return null;
+  }
+}
+
+export async function getUpvotedPosts(uid: string): Promise<CommunityPost[]> {
+  try {
+    const upvotedSnaps = await getDocs(query(collection(db, 'users', uid, 'upvotedPosts'), orderBy('createdAt', 'desc')));
+    if (upvotedSnaps.empty) return [];
+    
+    const postIds = upvotedSnaps.docs.map(d => d.id);
+    const posts: CommunityPost[] = [];
+    
+    // Firestore 'in' query allows up to 30 items
+    const chunks = [];
+    for (let i = 0; i < postIds.length; i += 30) {
+      chunks.push(postIds.slice(i, i + 30));
+    }
+    
+    for (const chunk of chunks) {
+      const q = query(collection(db, 'posts'), where('__name__', 'in', chunk));
+      const postSnaps = await getDocs(q);
+      postSnaps.forEach(snap => {
+        posts.push({ id: snap.id, ...mapDocDates(snap.data()) } as CommunityPost);
+      });
+    }
+    
+    // Re-sort to match original order
+    return posts.sort((a, b) => postIds.indexOf(a.id) - postIds.indexOf(b.id));
+  } catch (error) {
+    console.error("Failed to fetch upvoted posts", error);
+    return [];
   }
 }
 

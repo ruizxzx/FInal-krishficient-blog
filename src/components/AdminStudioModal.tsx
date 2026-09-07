@@ -635,7 +635,8 @@ export const AdminStudioModal: React.FC<AdminStudioModalProps> = ({
           name: authorName || siteConfig.authorName || 'Krish',
           role: authorRole || siteConfig.authorRole || 'Founder & Systems Architect',
           avatar: authorAvatarUrl || siteConfig.authorAvatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=400&auto=format&fit=crop',
-          bio: manifestoText || aboutMeBio || siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.'
+          bio: manifestoText || aboutMeBio || siteConfig.manifestoText || 'Writing about distributed systems, modern web runtimes, and engineering craft.',
+          uid: currentUserEmail ? auth.currentUser?.uid : undefined
         },
         content: contentBlocks.length > 0 ? contentBlocks : [{ type: 'paragraph', content: newExcerpt }]
       };

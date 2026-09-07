@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { CommunityUser, CommunityPost, PageView } from '../types';
-import { getProfileByUsername, getPosts, updateCommunityProfile, checkIsFollowing, followUser, unfollowUser, getCommunityProfile, deletePost } from '../lib/community';
-import { auth, checkIsAdmin } from '../lib/firebase';
+import { CommunityUser, CommunityPost, PageView, Article } from '../types';
+import { getProfileByUsername, getPosts, updateCommunityProfile, checkIsFollowing, followUser, unfollowUser, deletePost, getUpvotedPosts } from '../lib/community';
+import { fetchArticles } from '../lib/cms';
+import { auth, checkIsAdmin, ADMIN_EMAILS } from '../lib/firebase';
 import { ArrowLeft, User, Sparkles, MapPin, Link as LinkIcon, Settings, UserPlus, UserMinus, Loader2, Trash } from 'lucide-react';
+import { ArticleCard } from './ArticleCard';
+import { CommunityPostView } from './CommunityPostView';
 
 interface CommunityProfileViewProps {
   username: string;
@@ -13,8 +16,12 @@ interface CommunityProfileViewProps {
 export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ username, onNavigate, currentUserProfile }) => {
   const [profile, setProfile] = useState<CommunityUser | null>(null);
   const [posts, setPosts] = useState<CommunityPost[]>([]);
+  const [upvotedPosts, setUpvotedPosts] = useState<CommunityPost[]>([]);
+  const [dispatches, setDispatches] = useState<Article[]>([]);
   const [loading, setLoading] = useState(true);
   
+  const [activeTab, setActiveTab] = useState<'posts' | 'upvoted' | 'dispatches'>('posts');
+
   const [isEditing, setIsEditing] = useState(false);
   const [bioInput, setBioInput] = useState('');
   const [themeInput, setThemeInput] = useState('');
@@ -54,6 +61,8 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
     }
   };
 
+  const isProfileAdmin = profile?.email ? ADMIN_EMAILS.includes(profile.email) : false;
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -62,8 +71,18 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
       if (p) {
         setBioInput(p.bio || '');
         setThemeInput(p.themeColor || '#000000');
-        const userPosts = await getPosts(undefined, username);
+        
+        const [userPosts, upvoted] = await Promise.all([
+          getPosts(undefined, username),
+          getUpvotedPosts(p.uid)
+        ]);
         setPosts(userPosts);
+        setUpvotedPosts(upvoted);
+
+        if (p.email && ADMIN_EMAILS.includes(p.email)) {
+          const { articles: allArticles } = await fetchArticles();
+          setDispatches(allArticles.filter(a => a.author.uid === p.uid || !a.author.uid)); // Fallback if no uid set but admin
+        }
         
         if (auth.currentUser) {
           const following = await checkIsFollowing(auth.currentUser.uid, p.uid);
@@ -257,46 +276,113 @@ export const CommunityProfileView: React.FC<CommunityProfileViewProps> = ({ user
         </div>
       </div>
 
-      <h3 className="font-display font-black text-2xl uppercase mb-6 border-b-4 border-black pb-2 inline-block">
-        Activity &amp; Posts
-      </h3>
+      <div className="flex space-x-6 border-b-4 border-black mb-8 overflow-x-auto pb-1">
+        <button 
+          onClick={() => setActiveTab('posts')}
+          className={`font-display font-black text-xl uppercase whitespace-nowrap pb-2 ${activeTab === 'posts' ? 'text-[var(--color-primary)] border-b-4 border-[var(--color-primary)]' : 'text-black hover:text-neutral-500'}`}
+        >
+          Activity &amp; Posts ({posts.length})
+        </button>
+        <button 
+          onClick={() => setActiveTab('upvoted')}
+          className={`font-display font-black text-xl uppercase whitespace-nowrap pb-2 ${activeTab === 'upvoted' ? 'text-[var(--color-primary)] border-b-4 border-[var(--color-primary)]' : 'text-black hover:text-neutral-500'}`}
+        >
+          Upvoted ({upvotedPosts.length})
+        </button>
+        {isProfileAdmin && (
+          <button 
+            onClick={() => setActiveTab('dispatches')}
+            className={`font-display font-black text-xl uppercase whitespace-nowrap pb-2 ${activeTab === 'dispatches' ? 'text-[var(--color-primary)] border-b-4 border-[var(--color-primary)]' : 'text-black hover:text-neutral-500'}`}
+          >
+            Dispatches ({dispatches.length})
+          </button>
+        )}
+      </div>
 
       <div className="space-y-6">
-        {posts.length === 0 ? (
-          <p className="font-mono text-sm text-neutral-500">No posts yet.</p>
-        ) : (
-          posts.map(post => (
-            <div 
-              key={post.id} 
-              onClick={() => onNavigate('community_post', post.id)}
-              className="bg-white border-4 border-black p-5 cursor-pointer neo-shadow-sm hover:-translate-y-1 hover:neo-shadow transition-all group"
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase">
-                  {post.type}
+        {activeTab === 'posts' && (
+          posts.length === 0 ? (
+            <p className="font-mono text-sm text-neutral-500">No posts yet.</p>
+          ) : (
+            posts.map(post => (
+              <div 
+                key={post.id} 
+                onClick={() => onNavigate('community_post', post.id)}
+                className="bg-white border-4 border-black p-5 cursor-pointer neo-shadow-sm hover:-translate-y-1 hover:neo-shadow transition-all group"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase">
+                    {post.type}
+                  </div>
+                  {activeUser && (activeUser.uid === post.authorId || checkIsAdmin(activeUser?.email)) && (
+                    <button
+                      onClick={(e) => handleDeletePost(post.id, post.authorId, e)}
+                      className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-black transition-colors"
+                      title="Delete post"
+                    >
+                      <Trash className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
-                {activeUser && (activeUser.uid === post.authorId || checkIsAdmin(activeUser?.email)) && (
-                  <button
-                    onClick={(e) => handleDeletePost(post.id, post.authorId, e)}
-                    className="p-1.5 bg-red-100 hover:bg-red-200 text-red-700 border-2 border-black transition-colors"
-                    title="Delete post"
-                  >
-                    <Trash className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <h3 className="font-display font-black text-xl group-hover:text-[var(--color-primary)] transition-colors">
-                {post.title}
-              </h3>
-              <div className="mt-4 pt-4 border-t-2 border-neutral-100 flex justify-between font-mono text-xs text-neutral-500">
-                <span>{new Date(post.createdAt).toLocaleDateString()}</span>
-                <div className="flex space-x-4">
-                  <span>{post.upvotesCount} Upvotes</span>
-                  <span>{post.commentsCount} Comments</span>
+                <h3 className="font-display font-black text-xl group-hover:text-[var(--color-primary)] transition-colors">
+                  {post.title}
+                </h3>
+                <div className="mt-4 pt-4 border-t-2 border-neutral-100 flex justify-between font-mono text-xs text-neutral-500">
+                  <span>{new Date(post.createdAt).toLocaleDateString()}</span>
+                  <div className="flex space-x-4">
+                    <span>{post.upvotesCount} Upvotes</span>
+                    <span>{post.commentsCount} Comments</span>
+                  </div>
                 </div>
               </div>
+            ))
+          )
+        )}
+
+        {activeTab === 'upvoted' && (
+          upvotedPosts.length === 0 ? (
+            <p className="font-mono text-sm text-neutral-500">No upvoted posts yet.</p>
+          ) : (
+            upvotedPosts.map(post => (
+              <div 
+                key={post.id} 
+                onClick={() => onNavigate('community_post', post.id)}
+                className="bg-white border-4 border-black p-5 cursor-pointer neo-shadow-sm hover:-translate-y-1 hover:neo-shadow transition-all group"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="inline-block px-2 py-0.5 bg-[var(--color-secondary)] border border-black font-mono text-[10px] font-black uppercase">
+                    {post.type}
+                  </div>
+                </div>
+                <h3 className="font-display font-black text-xl group-hover:text-[var(--color-primary)] transition-colors">
+                  {post.title}
+                </h3>
+                <div className="mt-4 pt-4 border-t-2 border-neutral-100 flex justify-between font-mono text-xs text-neutral-500">
+                  <span>by @{post.authorUsername}</span>
+                  <div className="flex space-x-4">
+                    <span>{post.upvotesCount} Upvotes</span>
+                    <span>{post.commentsCount} Comments</span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )
+        )}
+
+        {activeTab === 'dispatches' && (
+          dispatches.length === 0 ? (
+            <p className="font-mono text-sm text-neutral-500">No dispatches published yet.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {dispatches.map(dispatch => (
+                <ArticleCard 
+                  key={dispatch.id} 
+                  article={dispatch} 
+                  onSelect={() => onNavigate('article', dispatch.slug)} 
+                />
+              ))}
             </div>
-          ))
+          )
         )}
       </div>
     </div>

@@ -33,6 +33,7 @@ interface ArticleViewProps {
   isSaved: boolean;
   onToggleSave: (slug: string) => void;
   siteConfig: SiteConfig;
+  onNavigate?: (page: any, param?: string) => void;
 }
 
 export const ArticleView: React.FC<ArticleViewProps> = ({
@@ -43,6 +44,7 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
   isSaved,
   onToggleSave,
   siteConfig,
+  onNavigate
 }) => {
   const [copiedCodeIdx, setCopiedCodeIdx] = useState<number | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -224,14 +226,25 @@ export const ArticleView: React.FC<ArticleViewProps> = ({
 
         {/* Author Metadata Strip */}
         <div className="p-4 bg-white neo-border neo-shadow mb-10 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3.5">
+          <div 
+            className="flex items-center space-x-3.5 cursor-pointer group"
+            onClick={async () => {
+              if (article.author.uid && onNavigate) {
+                const { getCommunityProfile } = await import('../lib/community');
+                const p = await getCommunityProfile(article.author.uid);
+                if (p && p.username) {
+                  onNavigate('community_profile', p.username);
+                }
+              }
+            }}
+          >
             <img
               src={siteConfig.authorAvatarUrl || article.author.avatar}
               alt={siteConfig.authorName || article.author.name}
-              className="w-12 h-12 neo-border-2 object-cover"
+              className="w-12 h-12 neo-border-2 object-cover group-hover:neo-shadow transition-all"
             />
             <div>
-              <div className="font-display font-black text-base text-black flex items-center space-x-1.5">
+              <div className="font-display font-black text-base text-black flex items-center space-x-1.5 group-hover:text-[var(--color-primary)] transition-colors">
                 <span>{siteConfig.authorName || article.author.name}</span>
                 <span className="text-[11px] font-mono font-bold bg-[var(--color-success)] text-black px-1.5 py-0.2 border-2 border-black">
                   AUTHOR

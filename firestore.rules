@@ -85,6 +85,14 @@ service cloud.firestore {
           && incoming().createdAt is timestamp;
         allow delete: if isSignedIn() && request.auth.uid == userId;
       }
+      
+      match /upvotedPosts/{postId} {
+        allow read: if true;
+        allow create, update: if isSignedIn()
+          && request.auth.uid == userId
+          && incoming().postId == postId;
+        allow delete: if isSignedIn() && request.auth.uid == userId;
+      }
     }
 
     match /usernames/{username} {
@@ -181,7 +189,9 @@ service cloud.firestore {
           && userId == request.auth.uid
           && incoming().postId == postId
           && incoming().userId == request.auth.uid
-          && incoming().type in ['up', 'down'];
+          && incoming().type in ['up', 'down']
+          && incoming().keys().hasAll(["postId", "userId", "type", "createdAt"])
+          && incoming().createdAt is timestamp;
         allow delete: if isSignedIn() && (
           request.auth.uid == userId || 
           isAdmin() || 
